@@ -1,5 +1,10 @@
 ## Notes
 
+Testing:
+```
+python tests/gridworld_test.py
+```
+
 Installing the virtualenv:
 ```
 virtualenv venv
