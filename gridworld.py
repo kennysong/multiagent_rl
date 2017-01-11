@@ -14,7 +14,11 @@
     x-movement and the second controlling the y-movement. Each time step incurs
     -1 reward, and stepping into the cliff incurs -100 reward and a reset to
     the start. An episode terminates when the player reaches the goal.
+
+    Note: the action space is {up, stay, down} x {left, stay, right},
+    vectorized as {-1, 0, 1} x {-1, 0, 1}, including diagonal movements.
 '''
+
 import numpy as np
 
 grid_rows, grid_cols = 4, 12
