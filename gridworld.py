@@ -1,5 +1,5 @@
 '''
-    This is a simple implementation of the Gridworld Cliff two-agent
+    This is a simple implementation of the two-agent Gridworld Cliff
     reinforcement learning task.
 
     Adapted from Example 6.6 at:
