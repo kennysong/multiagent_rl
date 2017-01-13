@@ -11,6 +11,7 @@ import theano.tensor as T
 
 from keras.models import Sequential
 from keras.layers import Dense
+from keras.layers import LSTM
 
 def run_episode(policy, gamma=1.0):
     '''Runs one episode of Gridworld Cliff to completion with a policy, which
@@ -80,10 +81,59 @@ def train_value_network(episode):
 
     return model
 
+def run_value_network(model, state):
+    '''Wrapper function to feed a given state into the given value network and
+       return the value.'''
+    result = model.predict(np.array([state]))
+    return result[0][0]
+
+def build_policy_network():
+    '''Builds an LSTM policy network, which maps states to action vectors.
+
+       More precisely, the input into the LSTM will be a 5-D vector consisting
+       of prev_output + state. The output of the LSTM will be a 3-D vector that
+       gives softmax probabilities of each action for the agents.
+
+       So, the LSTM has 3 input nodes and 3 output nodes.
+    '''
+    # CHECK: What should the middle number be and what does it mean here?
+    layers = [5, 1, 3]
+
+    model = Sequential()
+    model.add(LSTM(layers[1], input_dim=layers[0]))
+    model.add(Dense(layers[2], activation='softmax'))
+
+    # CHECK: We never use this loss function or optimizer, right? What should
+    # it be set to?
+    model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
+
+    return model
+
+def run_policy_network(model, state):
+    '''Wrapper function to feed a given state into the given policy network and
+       return the action [a_v, a_h], as well as the softmax probability of each
+       action [p_v, p_h].
+
+       The initial input into the LSTM will be [0, 0, 0] + state. This will
+       output the softmax probabilities for the 3 vertical actions. We select
+       one as a_v, a one-hot vector. The second input into the LSTM will be
+       a_v + state, which will output softmax probabilities for the 3
+       horizontal actions. We select one as a_h.
+
+       For simplicity, the output action [a_v, a_h] is transformed into a valid
+       action vector, e.g. [-1, 1], instead of the one-hot vectors.
+    '''
+    # CHECK: this doesn't work, why?
+    initial_input = np.concatenate((np.zeros(3), state)).reshape(1, 1, 5)
+    dist_v = model.predict(initial_input)
+
 def random_policy(state):
     '''Returns a random action at any state.'''
     return random.choice(gridworld.action_space)
 
 if __name__ == '__main__':
-    episode = run_episode(random_policy)
-    model = train_value_network(episode)
+    # episode = run_episode(random_policy)
+    # value_net = train_value_network(episode)
+
+    policy_net = build_policy_network()
+    run_policy_network(policy_net, np.array([3, 0]))
