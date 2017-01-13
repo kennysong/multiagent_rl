@@ -94,7 +94,7 @@ def build_policy_network():
        of prev_output + state. The output of the LSTM will be a 3-D vector that
        gives softmax probabilities of each action for the agents.
 
-       So, the LSTM has 3 input nodes and 3 output nodes.
+       So, the LSTM has 5 input nodes and 3 output nodes.
     '''
     # CHECK: What should the middle number be and what does it mean here?
     layers = [5, 1, 3]
