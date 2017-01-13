@@ -46,11 +46,20 @@ def run_episode(policy, gamma=1.0):
 
     return episode
 
+def build_value_network():
+    '''Builds an MLP value function approximator, which maps states to scalar
+       values. It has one hidden layer with 10 units and relu activations.
+    '''
+    layers = [2, 10, 1]
+    model = Sequential()
+    model.add(Dense(layers[1], input_dim=layers[0], activation='relu'))
+    model.add(Dense(layers[2]))
+    model.compile(optimizer='rmsprop', loss='mse')
+    return model
+
 def train_value_network(episode):
     '''Trains an MLP value function approximator based on the output of one
        episode. The value network will map states to scalar values.
-
-       The MLP has one hidden layer with 128 units and relu activations.
 
        Parameters:
        episode is [[(s_0, a_0), r_1, G_1], ..., [(s_{T-1}, a_{T-1}), r_T, G_T]]
@@ -59,21 +68,15 @@ def train_value_network(episode):
          G_{t+1} is the discounted return received from that state-action pair.
 
        Returns:
-       The value network as a Keras Model.
+       The trained value network as a Keras Model.
     '''
     # Parse episode data into Numpy arrays of states and returns
     states = np.array([t[0][0] for t in episode])
     returns = np.array([t[2] for t in episode])
 
-    # Define MLP model
-    layers = [2, 128, 1]
-    model = Sequential()
-    model.add(Dense(layers[1], input_dim=layers[0], activation='relu'))
-    model.add(Dense(layers[2]))
-    model.compile(optimizer='rmsprop', loss='mse')
-
     # Train the MLP model on states, returns
-    model.fit(states, returns, nb_epoch=100, verbose=0)
+    model = build_value_network()
+    model.fit(states, returns, nb_epoch=1, verbose=0)
 
     return model
 
