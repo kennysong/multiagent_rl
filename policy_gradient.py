@@ -96,11 +96,13 @@ def build_policy_network():
 
        So, the LSTM has 5 input nodes and 3 output nodes.
     '''
-    # CHECK: What should the middle number be and what does it mean here?
-    layers = [5, 1, 3]
-
+    layers = [5, 32, 3]
     model = Sequential()
-    model.add(LSTM(layers[1], input_dim=layers[0]))
+
+    # We use a stateful LSTM layer to be able to predict each agent's action
+    # incrementally, by feeding 1 input with 1 time step of layers[0] features,
+    # which will output one agent's action
+    model.add(LSTM(layers[1], batch_input_shape=(1, 1, layers[0]), stateful=True))
     model.add(Dense(layers[2], activation='softmax'))
 
     # CHECK: We never use this loss function or optimizer, right? What should
@@ -109,23 +111,61 @@ def build_policy_network():
 
     return model
 
+def train_policy_network(model, episode, baseline=None):
+    '''Update the policy network parameters with the REINFORCE algorithm.
+
+       For each parameter W of the policy network,
+
+       Parameters:
+       model is our LSTM policy network
+       episode is [[(s_0, a_0), r_1, G_1], ..., [(s_{T-1}, a_{T-1}), r_T, G_T]]
+         (s_t, a_t) is each state-action pair visited during the episode.
+         r_{t+1} is the reward received from that state-action pair.
+         G_{t+1} is the discounted return received from that state-action pair
+       baseline is our MLP value network
+    '''
+
 def run_policy_network(model, state):
     '''Wrapper function to feed a given state into the given policy network and
        return the action [a_v, a_h], as well as the softmax probability of each
        action [p_v, p_h].
 
-       The initial input into the LSTM will be [0, 0, 0] + state. This will
-       output the softmax probabilities for the 3 vertical actions. We select
-       one as a_v, a one-hot vector. The second input into the LSTM will be
-       a_v + state, which will output softmax probabilities for the 3
+       The initial input into the LSTM will be concat([0, 0, 0], state). This
+       will output the softmax probabilities for the 3 vertical actions. We
+       select one as a_v, a one-hot vector. The second input into the LSTM will
+       be concat(a_v, state), which will output softmax probabilities for the 3
        horizontal actions. We select one as a_h.
 
        For simplicity, the output action [a_v, a_h] is transformed into a valid
        action vector, e.g. [-1, 1], instead of the one-hot vectors.
     '''
-    # CHECK: this doesn't work, why?
+    # Model is a stateful LSTM, so make sure the state is reset
+    assert model.stateful
+    model.reset_states()
+
+    # Predict action for the vertical agent and its probability
+    actions = [-1, 0, 1]
     initial_input = np.concatenate((np.zeros(3), state)).reshape(1, 1, 5)
-    dist_v = model.predict(initial_input)
+    dist_v = model.predict(initial_input)[0]
+    index_v = np.random.choice(range(len(dist_v)), p=dist_v)
+    p_v = dist_v[index_v]
+    a_v = actions[index_v]
+
+    # Convert a_v to a one-hot vector
+    onehot_v = np.zeros(len(dist_v))
+    onehot_v[index_v] = 1
+
+    # Predict action for the horizontal agent and its probability
+    second_input = np.concatenate((onehot_v, state)).reshape(1, 1, 5)
+    dist_h = model.predict(initial_input)[0]
+    index_h = np.random.choice(range(len(dist_h)), p=dist_h)
+    p_h = dist_h[index_h]
+    a_h = actions[index_h]
+
+    # Reset the states of the LSTM
+    model.reset_states()
+
+    return [a_v, a_h], [p_v, p_h]
 
 def random_policy(state):
     '''Returns a random action at any state.'''
@@ -136,4 +176,4 @@ if __name__ == '__main__':
     # value_net = train_value_network(episode)
 
     policy_net = build_policy_network()
-    run_policy_network(policy_net, np.array([3, 0]))
+    print(run_policy_network(policy_net, np.array([3, 0])))
