@@ -13,13 +13,15 @@ from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import LSTM
 
-def run_episode(policy, gamma=1.0):
-    '''Runs one episode of Gridworld Cliff to completion with a policy, which
-       is a function mapping states to actions. gamma is the discount factor.
+def run_episode(policy_net, gamma=1.0):
+    '''Runs one episode of Gridworld Cliff to completion with a policy network,
+       which is a LSTM that mapping states to actions, and returns the
+       probabilities of those actions. gamma is the discount factor.
 
        Returns:
-       [[(s_0, a_0), r_1, G_1], ..., [(s_{T-1}, a_{T-1}), r_T, G_T]]
-         (s_t, a_t) is each state-action pair visited during the episode.
+       [[(s_0, a_0, p_0), r_1, G_1], ..., [(s_{T-1}, a_{T-1}, p_{T-1}), r_T, G_T]]
+         s_t, a_t is each state-action pair visited during the episode.
+         p_t is the probability of taking a_t from s_t, given by the policy.
          r_{t+1} is the reward received from that state-action pair.
          G_{t+1} is the discounted return received from that state-action pair.
     '''
@@ -30,13 +32,13 @@ def run_episode(policy, gamma=1.0):
     # Run Gridworld until episode terminates at the goal
     while not np.array_equal(state, gridworld.goal):
         # Let our agent decide that to do at this state
-        action = policy(state)
+        action, probs = run_policy_network(policy_net, state)
 
         # Take that action, then environment gives us the next state and reward
         next_s, reward = gridworld.perform_action(state, action)
 
-        # Record [(state, action), reward]
-        episode.append([(state, action), reward])
+        # Record [(state, action, probs), reward]
+        episode.append([(state, action, probs), reward])
         state = next_s
 
     # We have the reward from each (state, action), now calculate the return
@@ -63,10 +65,7 @@ def train_value_network(episode):
        episode. The value network will map states to scalar values.
 
        Parameters:
-       episode is [[(s_0, a_0), r_1, G_1], ..., [(s_{T-1}, a_{T-1}), r_T, G_T]]
-         (s_t, a_t) is each state-action pair visited during the episode.
-         r_{t+1} is the reward received from that state-action pair.
-         G_{t+1} is the discounted return received from that state-action pair.
+       episode is an list of episode data, see run_episode()
 
        Returns:
        The trained value network as a Keras Model.
@@ -111,19 +110,25 @@ def build_policy_network():
 
     return model
 
-def train_policy_network(model, episode, baseline=None):
+def train_policy_network(model, episode, baseline=None, alpha=0.001):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
-       For each parameter W of the policy network,
+       For each parameter W of the policy network, we make the following update:
+         W += alpha * [grad(sum(log(p_t))) * (G_t - baseline(s_t))]
+       for all time steps in the episode.
 
        Parameters:
        model is our LSTM policy network
-       episode is [[(s_0, a_0), r_1, G_1], ..., [(s_{T-1}, a_{T-1}), r_T, G_T]]
-         (s_t, a_t) is each state-action pair visited during the episode.
-         r_{t+1} is the reward received from that state-action pair.
-         G_{t+1} is the discounted return received from that state-action pair
+       episode is an list of episode data, see run_episode()
        baseline is our MLP value network
     '''
+    for data in episode:
+        s_t = data[0][0]
+        G_t = data[2]
+
+        for W in model.weights:
+            # CHECK: What should p_t be set to?
+            p_t = model.layers[1].output
 
 def run_policy_network(model, state):
     '''Wrapper function to feed a given state into the given policy network and
@@ -165,15 +170,12 @@ def run_policy_network(model, state):
     # Reset the states of the LSTM
     model.reset_states()
 
-    return [a_v, a_h], [p_v, p_h]
-
-def random_policy(state):
-    '''Returns a random action at any state.'''
-    return random.choice(gridworld.action_space)
+    return np.array([a_v, a_h]), np.array([p_v, p_h])
 
 if __name__ == '__main__':
-    # episode = run_episode(random_policy)
+    policy_net = build_policy_network()
+    episode = run_episode(policy_net)
     # value_net = train_value_network(episode)
 
-    policy_net = build_policy_network()
-    print(run_policy_network(policy_net, np.array([3, 0])))
+    # print(run_policy_network(policy_net, np.array([3, 0])))
+    train_policy_network(policy_net, episode)
