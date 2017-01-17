@@ -114,7 +114,9 @@ def train_policy_network(model, episode, baseline=None, alpha=0.001):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, we make the following update:
-         W += alpha * [grad(sum(log(p_t))) * (G_t - baseline(s_t))]
+         W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
+            = alpha * [grad_W(sum(log(p_t))) * (G_t - baseline(s_t))]
+            = alpha * [sum(grad_W(log(p_t))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
 
        Parameters:
@@ -122,13 +124,19 @@ def train_policy_network(model, episode, baseline=None, alpha=0.001):
        episode is an list of episode data, see run_episode()
        baseline is our MLP value network
     '''
+    # CHECK: This doesn't work! Why?
+    log_p_t = T.log(model.layers[1].output)
+    grads = T.grad(log_p_t, model.weights)
+    gradients = theano.function([s_t], grads)
+
     for data in episode:
         s_t = data[0][0]
         G_t = data[2]
 
+        # CHECK: Somehow calculate gradients here
         for W in model.weights:
-            # CHECK: What should p_t be set to?
-            p_t = model.layers[1].output
+            # CHECK: Something like this?
+            # W.set_value(W.get_value() + alpha * gradient * (G_t - baseline))
 
 def run_policy_network(model, state):
     '''Wrapper function to feed a given state into the given policy network and
