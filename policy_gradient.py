@@ -124,17 +124,17 @@ def train_policy_network(model, episode, baseline=None, alpha=0.001):
        episode is an list of episode data, see run_episode()
        baseline is our MLP value network
     '''
-    # CHECK: This doesn't work! Why?
+    # CHECK: How do I fix this? 
     log_p_t = T.log(model.layers[1].output)
-    grads = T.grad(log_p_t, model.weights)
-    gradients = theano.function([s_t], grads)
+    W_i = model.weights[0]
+    grads = T.grad(log_p_t, W_i)
 
     for data in episode:
         s_t = data[0][0]
         G_t = data[2]
 
         # CHECK: Somehow calculate gradients here
-        for W in model.weights:
+        # for W in model.weights:
             # CHECK: Something like this?
             # W.set_value(W.get_value() + alpha * gradient * (G_t - baseline))
 
