@@ -6,9 +6,9 @@
     https://webdocs.cs.ualberta.ca/~sutton/book/ebook/node65.html
 
     The board is a 4x12 matrix, with (using Numpy matrix indexing):
-        [3, 0] as the start at bottom-left
-        [3, 11] as the goal at bottom-right
-        [3, 1..10] as the cliff at bottom-center
+        [0, 0] as the start at top-left
+        [0, 11] as the goal at top-right
+        [0, 1..10] as the cliff at top-center
 
     There are two agents that control one player, the first controlling the
     x-movement and the second controlling the y-movement. Each time step incurs
@@ -25,8 +25,8 @@ grid_rows, grid_cols = 4, 12
 state_space = [np.array((i, j)) for i in range(grid_rows) for j in range(grid_cols)]
 action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
 
-start, goal = np.array((grid_rows-1, 0)), np.array((grid_rows-1, grid_cols-1))
-cliff_states = [np.array((grid_rows-1, i)) for i in range(1, grid_cols-1)]
+start, goal = np.array((0, 0)), np.array((0, grid_cols-1))
+cliff_states = [np.array((0, i)) for i in range(1, grid_cols-1)]
 
 def P(s, s_next, a):
     '''The transition probabilities. Returns:

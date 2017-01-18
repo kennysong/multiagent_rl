@@ -16,8 +16,10 @@ import random
 
 if __name__ == '__main__':
     player = gw.start
+    reward = 0
 
     while True:
+        print('\nReceived reward: {}'.format(reward))
         board = np.zeros((gw.grid_rows, gw.grid_cols))
         board[player[0], player[1]] = 1
 
@@ -31,7 +33,8 @@ if __name__ == '__main__':
             break
 
         raw_input('Press enter to perform the action.')
-
         player, reward = gw.perform_action(player, action)
-        print('\nReceived reward: {}'.format(reward))
+
+        # Clears and overwrites previous lines
+        sys.stdout.write('\033[K\033[F' * 8)
 
