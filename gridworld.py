@@ -21,7 +21,7 @@
 
 import numpy as np
 
-grid_rows, grid_cols = 4, 4 # It was taking ages
+grid_rows, grid_cols = 2, 2 # It was taking ages
 state_space = [np.array((i, j)) for i in range(grid_rows) for j in range(grid_cols)]
 action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
 
