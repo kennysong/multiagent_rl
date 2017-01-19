@@ -8,10 +8,10 @@ import numpy as np
 import random
 import theano
 import theano.tensor as T
+import keras
 
 from keras.models import Sequential
-from keras.layers import Dense
-from keras.layers import LSTM
+from keras.layers import Dense, LSTM, Input
 
 def run_episode(policy_net, gamma=1.0):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
@@ -41,6 +41,11 @@ def run_episode(policy_net, gamma=1.0):
         episode.append([(state, action, probs), reward])
         state = next_s
 
+        # This is taking ages
+        if len(episode) > 100:
+            break
+
+
     # We have the reward from each (state, action), now calculate the return
     T = len(episode)
     for i in range(T):
@@ -53,14 +58,16 @@ def build_value_network():
     '''Builds an MLP value function approximator, which maps states to scalar
        values. It has one hidden layer with 10 units and relu activations.
     '''
-    layers = [2, 10, 1]
+    layers = [2, 32, 1]
     model = Sequential()
-    model.add(Dense(layers[1], input_dim=layers[0], activation='relu'))
+    model.add(Dense(layers[1], input_dim=layers[0], activation='tanh')) # Relus throw nans.
     model.add(Dense(layers[2]))
-    model.compile(optimizer='rmsprop', loss='mse')
+
+    opt = keras.optimizers.RMSprop(lr=1e-4, epsilon=1e-4)
+    model.compile(optimizer=opt, loss='mae') #MSE was throwing nans
     return model
 
-def train_value_network(episode):
+def train_value_network(model, episode):
     '''Trains an MLP value function approximator based on the output of one
        episode. The value network will map states to scalar values.
 
@@ -75,10 +82,9 @@ def train_value_network(episode):
     returns = np.array([t[2] for t in episode])
 
     # Train the MLP model on states, returns
-    model = build_value_network()
-    model.fit(states, returns, nb_epoch=1, verbose=0)
+    error = model.train_on_batch(states, returns)
 
-    return model
+    return error
 
 def run_value_network(model, state):
     '''Wrapper function to feed a given state into the given value network and
@@ -110,7 +116,31 @@ def build_policy_network():
 
     return model
 
-def train_policy_network(model, episode, baseline=None, alpha=0.001):
+# TODO: make this not hardcoded to this architecture, input output dims and such
+def compile_gradient_functions(model):
+    index_v = T.iscalar()
+    index_h = T.iscalar()
+
+    input_1 = Input(shape=(1, 5,)) #TODO: Check that this is okay. I think it adds an extra batch_size dim to the first one so it's okay.
+    input_2 = Input(shape=(1, 5,))
+
+    dist_v = model(input_1)
+    log_p_t_v = T.log(dist_v[0, index_v]) # First dimension is over samples in batch so = 1
+
+    # TODO: I'm not massively sure the stateful is going through this but it should
+    # Where's the symbolic 'model.reset_states'?
+    dist_h = model(input_2) 
+    log_p_t_h = T.log(dist_h[0, index_h]) 
+
+    log_p_t_sum = log_p_t_v + log_p_t_h
+
+    grads_log_p_t = [T.grad(log_p_t_sum, w) for w in model.weights]
+
+    get_gradients = theano.function([input_1, input_2, index_v, index_h], grads_log_p_t, allow_input_downcast=True)
+    
+    return get_gradients
+
+def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-4):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, we make the following update:
@@ -124,19 +154,39 @@ def train_policy_network(model, episode, baseline=None, alpha=0.001):
        episode is an list of episode data, see run_episode()
        baseline is our MLP value network
     '''
-    # CHECK: How do I fix this? 
-    log_p_t = T.log(model.layers[1].output)
-    W_i = model.weights[0]
-    grads = T.grad(log_p_t, W_i)
 
-    for data in episode:
+    w_step = [np.zeros(w.get_value().shape, dtype='float32') for w in model.weights]
+    
+    if baseline is not None:
+        state_batch = np.asarray([data[0][0] for data in episode])
+        baseline_predicts = baseline.predict(state_batch)
+    for t, data in enumerate(episode):
         s_t = data[0][0]
+        a_t = data[0][1]
         G_t = data[2]
+        
+        index_v = a_t[0] + 1 # There should be an action -> index function
+        index_h = a_t[1] + 1
+        
+        input_1 = np.concatenate((np.zeros(3), s_t)).reshape(1, 1, 5)
+        
+        onehot_v = np.zeros(3)
+        onehot_v[index_v] = 1
+        input_2 = np.concatenate((onehot_v, s_t)).reshape(1, 1, 5)
+        
+        # Is this the place to reset states?
+        model.reset_states
+        gradients = get_gradients(input_1, input_2, index_v, index_h)
+        
+        for i in range(len(w_step)):
+            if baseline == None:
+                w_step[i] += gradients[i] * G_t
+            else:
+                w_step[i] += gradients[i] * (G_t - baseline_predicts[t])
 
-        # CHECK: Somehow calculate gradients here
-        # for W in model.weights:
-            # CHECK: Something like this?
-            # W.set_value(W.get_value() + alpha * gradient * (G_t - baseline))
+    # TODO: do rmsprop instead of rprop
+    for i, w in enumerate(model.weights):
+        w.set_value(w.get_value() + alpha * w_step[i] / (np.abs(w_step[i]) + 1e-4))
 
 def run_policy_network(model, state):
     '''Wrapper function to feed a given state into the given policy network and
@@ -152,10 +202,11 @@ def run_policy_network(model, state):
        For simplicity, the output action [a_v, a_h] is transformed into a valid
        action vector, e.g. [-1, 1], instead of the one-hot vectors.
     '''
+    
     # Model is a stateful LSTM, so make sure the state is reset
     assert model.stateful
     model.reset_states()
-
+    
     # Predict action for the vertical agent and its probability
     actions = [-1, 0, 1]
     initial_input = np.concatenate((np.zeros(3), state)).reshape(1, 1, 5)
@@ -170,7 +221,7 @@ def run_policy_network(model, state):
 
     # Predict action for the horizontal agent and its probability
     second_input = np.concatenate((onehot_v, state)).reshape(1, 1, 5)
-    dist_h = model.predict(initial_input)[0]
+    dist_h = model.predict(second_input)[0]
     index_h = np.random.choice(range(len(dist_h)), p=dist_h)
     p_h = dist_h[index_h]
     a_h = actions[index_h]
@@ -182,8 +233,11 @@ def run_policy_network(model, state):
 
 if __name__ == '__main__':
     policy_net = build_policy_network()
-    episode = run_episode(policy_net)
-    # value_net = train_value_network(episode)
+    value_net = build_value_network()
 
-    # print(run_policy_network(policy_net, np.array([3, 0])))
-    train_policy_network(policy_net, episode)
+    get_gradients = compile_gradient_functions(policy_net)
+    for num_episode in range(1000):
+        episode = run_episode(policy_net)
+        value_error = train_value_network(value_net, episode)
+        print("Num episode:{0} Return:{1} Baseline error:{2}".format(num_episode, episode[0][2], value_error)) # Print episode return
+        train_policy_network(policy_net, episode, get_gradients, baseline=value_net)
