@@ -11,7 +11,7 @@
         [0, 1..10] as the cliff at top-center
 
     There are two agents that control one player, the first controlling the
-    x-movement and the second controlling the y-movement. Each time step incurs
+    y-movement and the second controlling the x-movement. Each time step incurs
     -1 reward, and stepping into the cliff incurs -100 reward and a reset to
     the start. An episode terminates when the player reaches the goal.
 
@@ -21,12 +21,12 @@
 
 import numpy as np
 
-grid_rows, grid_cols = 4, 12
-state_space = [np.array((i, j)) for i in range(grid_rows) for j in range(grid_cols)]
-action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
+grid_y, grid_x = 4, 12
+state_space = [np.array((y, x)) for y in range(grid_y) for x in range(grid_x)]
+action_space = [np.array((y, x)) for y in (-1, 0, 1) for x in (-1, 0, 1)]
 
-start, goal = np.array((0, 0)), np.array((0, grid_cols-1))
-cliff_states = [np.array((0, i)) for i in range(1, grid_cols-1)]
+start, goal = np.array((0, 0)), np.array((0, grid_x-1))
+cliff_states = [np.array((0, x)) for x in range(1, grid_x-1)]
 
 def P(s, s_next, a):
     '''The transition probabilities. Returns:
