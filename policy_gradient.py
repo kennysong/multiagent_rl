@@ -13,7 +13,7 @@ import keras
 from keras.models import Sequential
 from keras.layers import Dense, LSTM, Input
 
-def run_episode(policy_net, gamma=1.0):
+def run_episode(policy_net, gamma=1):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
        which is a LSTM that mapping states to actions, and returns the
        probabilities of those actions. gamma is the discount factor.
@@ -43,8 +43,6 @@ def run_episode(policy_net, gamma=1.0):
 
         # This is taking ages
         if len(episode) > 100:
-            # The agent is taking too long, so set reward to -1000
-            episode[-1][-1] = -1000
             break
 
     # We have the reward from each (state, action), now calculate the return
@@ -64,7 +62,7 @@ def build_value_network():
     model.add(Dense(layers[1], input_dim=layers[0], activation='tanh')) # Relus throw nans.
     model.add(Dense(layers[2]))
 
-    opt = keras.optimizers.RMSprop(lr=1e-4, epsilon=1e-4)
+    opt = keras.optimizers.RMSprop(lr=1e-3, epsilon=1e-5)
     model.compile(optimizer=opt, loss='mae') # MSE was throwing nans
     return model
 
@@ -149,7 +147,7 @@ def compile_gradient_functions(model):
 
     return get_gradients
 
-def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-4):
+def train_policy_network(model, episode, get_gradients, baseline=None, lr=3*1e-3):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, we make the following update:
@@ -185,7 +183,7 @@ def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-
         # Is this the place to reset states?
         model.reset_states()
         gradients = get_gradients(input_1, input_2, index_v, index_h)
-        model.reset_states()
+        model.reset_states() # Again to be safe
 
         for i in range(len(w_step)):
             if baseline == None:
@@ -195,7 +193,7 @@ def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-
 
     # TODO: do rmsprop instead of rprop
     for i, w in enumerate(model.weights):
-        w.set_value(w.get_value() + alpha * w_step[i] / (np.abs(w_step[i]) + 1e-4))
+        w.set_value(w.get_value() + lr * w_step[i] / (np.abs(w_step[i]) + 1e-5))
 
 def run_policy_network(model, state):
     '''Wrapper function to feed a given state into the given policy network and
@@ -245,8 +243,12 @@ if __name__ == '__main__':
     value_net = build_value_network()
 
     get_gradients = compile_gradient_functions(policy_net)
-    for num_episode in range(1000):
-        episode = run_episode(policy_net)
+    cum_value_error = 0.0
+    cum_return = 0.0
+    for num_episode in range(50000):
+        episode = run_episode(policy_net, gamma=1)
         value_error = train_value_network(value_net, episode)
-        print("Num episode:{0} Return:{1} Baseline error:{2}".format(num_episode, episode[0][2], value_error)) # Print episode return
+        cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
+        cum_return = 0.9 * cum_return + 0.1 * episode[0][2]
+        print("Num episode:{0} Return:{1} Baseline error:{2}".format(num_episode, cum_return, cum_value_error)) # Print episode return
         train_policy_network(policy_net, episode, get_gradients, baseline=value_net)
