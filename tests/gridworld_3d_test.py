@@ -9,7 +9,7 @@
 import os.path, sys
 sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), os.pardir))
 
-import gridworld as gw
+import gridworld_3d as gw
 import numpy as np
 import random
 
@@ -19,8 +19,8 @@ if __name__ == '__main__':
 
     while True:
         print('\nReceived reward: {}'.format(reward))
-        board = np.zeros((gw.grid_y, gw.grid_x))
-        board[player[0], player[1]] = 1
+        board = np.zeros((gw.grid_z, gw.grid_y, gw.grid_x))
+        board[player[0], player[1], player[2]] = 1
 
         if not np.array_equal(player, gw.goal):
             action = random.choice(gw.action_space)
@@ -35,5 +35,4 @@ if __name__ == '__main__':
         player, reward = gw.perform_action(player, action)
 
         # Clears and overwrites previous lines
-        sys.stdout.write('\033[K\033[F' * 8)
-
+        sys.stdout.write('\033[K\033[F' * 45)
