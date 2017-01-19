@@ -21,9 +21,9 @@
 
 import numpy as np
 
-grid_y, grid_x = 4, 12
-state_space = [np.array((y, x)) for y in range(grid_y) for x in range(grid_x)]
-action_space = [np.array((y, x)) for y in (-1, 0, 1) for x in (-1, 0, 1)]
+grid_y, grid_x = 4, 4 # It was taking ages
+state_space = [np.array((i, j)) for i in range(grid_y) for j in range(grid_x)]
+action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
 
 start, goal = np.array((0, 0)), np.array((0, grid_x-1))
 cliff_states = [np.array((0, x)) for x in range(1, grid_x-1)]
