@@ -43,8 +43,9 @@ def run_episode(policy_net, gamma=1.0):
 
         # This is taking ages
         if len(episode) > 100:
+            # The agent is taking too long, so set reward to -1000
+            episode[-1][-1] = -1000
             break
-
 
     # We have the reward from each (state, action), now calculate the return
     T = len(episode)
@@ -64,7 +65,7 @@ def build_value_network():
     model.add(Dense(layers[2]))
 
     opt = keras.optimizers.RMSprop(lr=1e-4, epsilon=1e-4)
-    model.compile(optimizer=opt, loss='mae') #MSE was throwing nans
+    model.compile(optimizer=opt, loss='mae') # MSE was throwing nans
     return model
 
 def train_value_network(model, episode):
@@ -85,6 +86,7 @@ def train_value_network(model, episode):
     error = model.train_on_batch(states, returns)
 
     return error
+
 
 def run_value_network(model, state):
     '''Wrapper function to feed a given state into the given value network and
@@ -118,6 +120,13 @@ def build_policy_network():
 
 # TODO: make this not hardcoded to this architecture, input output dims and such
 def compile_gradient_functions(model):
+    '''Compiles a Theano function that calculates grad_W(sum(log(p_t))) for all
+       parameters W of the LSTM, given specific inputs into the LSTM (input_1, 
+       input_2) and the selected actions (index_v, index_h).
+
+       Parameters:
+       model is our LSTM policy network
+    '''
     index_v = T.iscalar()
     index_h = T.iscalar()
 
@@ -129,15 +138,15 @@ def compile_gradient_functions(model):
 
     # TODO: I'm not massively sure the stateful is going through this but it should
     # Where's the symbolic 'model.reset_states'?
-    dist_h = model(input_2) 
-    log_p_t_h = T.log(dist_h[0, index_h]) 
+    dist_h = model(input_2)
+    log_p_t_h = T.log(dist_h[0, index_h])
 
     log_p_t_sum = log_p_t_v + log_p_t_h
 
     grads_log_p_t = [T.grad(log_p_t_sum, w) for w in model.weights]
 
     get_gradients = theano.function([input_1, input_2, index_v, index_h], grads_log_p_t, allow_input_downcast=True)
-    
+
     return get_gradients
 
 def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-4):
@@ -146,7 +155,6 @@ def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-
        For each parameter W of the policy network, we make the following update:
          W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
             = alpha * [grad_W(sum(log(p_t))) * (G_t - baseline(s_t))]
-            = alpha * [sum(grad_W(log(p_t))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
 
        Parameters:
@@ -156,7 +164,7 @@ def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-
     '''
 
     w_step = [np.zeros(w.get_value().shape, dtype='float32') for w in model.weights]
-    
+
     if baseline is not None:
         state_batch = np.asarray([data[0][0] for data in episode])
         baseline_predicts = baseline.predict(state_batch)
@@ -164,20 +172,21 @@ def train_policy_network(model, episode, get_gradients, baseline=None, alpha=1e-
         s_t = data[0][0]
         a_t = data[0][1]
         G_t = data[2]
-        
+
         index_v = a_t[0] + 1 # There should be an action -> index function
         index_h = a_t[1] + 1
-        
+
         input_1 = np.concatenate((np.zeros(3), s_t)).reshape(1, 1, 5)
-        
+
         onehot_v = np.zeros(3)
         onehot_v[index_v] = 1
         input_2 = np.concatenate((onehot_v, s_t)).reshape(1, 1, 5)
-        
+
         # Is this the place to reset states?
-        model.reset_states
+        model.reset_states()
         gradients = get_gradients(input_1, input_2, index_v, index_h)
-        
+        model.reset_states()
+
         for i in range(len(w_step)):
             if baseline == None:
                 w_step[i] += gradients[i] * G_t
@@ -202,11 +211,11 @@ def run_policy_network(model, state):
        For simplicity, the output action [a_v, a_h] is transformed into a valid
        action vector, e.g. [-1, 1], instead of the one-hot vectors.
     '''
-    
+
     # Model is a stateful LSTM, so make sure the state is reset
     assert model.stateful
     model.reset_states()
-    
+
     # Predict action for the vertical agent and its probability
     actions = [-1, 0, 1]
     initial_input = np.concatenate((np.zeros(3), state)).reshape(1, 1, 5)
