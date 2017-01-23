@@ -29,7 +29,7 @@ if __name__ == '__main__':
                 board[state[j], state[j+1]] = 3  # Rabbits
         print(board)
 
-        if is_end: 
+        if is_end:
             print('Hunters captured all rabbits.')
             break
 

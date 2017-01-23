@@ -24,7 +24,7 @@ k = 3  # hunters
 m = 3  # rabbits
 
 def initial_state():
-    '''Returns a randomly initial state. The state vector is a flat array of:
+    '''Returns a random initial state. The state vector is a flat array of:
         concat(hunter positions, rabbit positions).'''
     return np.random.randint(0, n, size=2*k+2*m)
 
@@ -50,6 +50,7 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False):
 
        Returns:
        (s_next, reward, is_end)'''
+    # Validate inputs
     assert valid_state(s)
     assert valid_action(a)
 
@@ -110,7 +111,7 @@ def opposite_direction(s, a, i):
         d = np.linalg.norm(rabbit - s[j:j+2])
         if d < distance:
             closest_hunter = s[j:j+2]
-    
+
     # Calculate opposite direction
     return np.sign(rabbit - closest_hunter)
 
