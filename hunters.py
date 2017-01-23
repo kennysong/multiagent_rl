@@ -44,9 +44,9 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False):
        a is the action vector
        rabbit_action is either
          None: rabbits do not move
-         'random': rabbits move up, down, left, right randomly
-         'opposite': rabbits move in the opposite to the closest hunter
-       remove_hunter is whether or not we remove hunters after capturing a rabbit
+         'random': rabbits move one block randomly
+         'opposite': rabbits move opposite to the closest hunter
+       remove_hunter will remove the first hunter that captures a rabbit
 
        Returns:
        (s_next, reward, is_end)'''
@@ -59,7 +59,9 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False):
     elif rabbit_action == 'random':
         rabbit_a = np.random.randint(-1, 2, size=2*m)
     elif rabbit_action == 'opposite':
-        pass
+        rabbit_a = np.zeros(2*m, dtype=np.int)
+        for i in range(0, 2*m, 2):
+            rabbit_a[i:i+2] = opposite_direction(s, a, 2*k+i)
     else:
         raise ValueError('Invalid rabbit_action')
 
@@ -67,21 +69,48 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False):
     a = np.concatenate((a, rabbit_a))
     positions = np.zeros(len(s), dtype=np.int)
     for i in range(len(s)):
-        positions[i] = s[i] + a[i] if 0 <= s[i] + a[i] < n else s[i]
+        if s[i] == -1:
+            positions[i] = s[i]
+        elif 0 <= s[i] + a[i] < n:
+            positions[i] = s[i] + a[i]
+        else:
+            positions[i] = s[i]
 
     # Remove rabbits (and optionally hunters) that overlap
     hunter_pos, rabbit_pos = positions[:2*k], positions[2*k:]
-    if remove_hunter:
-        pass
-    else:
-        for i in range(0, len(hunter_pos), 2):
-            hunter = hunter_pos[i:i+2]
-            for j in range(0, len(rabbit_pos), 2):
-                rabbit = rabbit_pos[j:j+2]
-                if (hunter == rabbit).all():
-                    rabbit_pos[j:j+2] = [-1, -1]
+    for i in range(0, len(hunter_pos), 2):
+        hunter = hunter_pos[i:i+2]
+        for j in range(0, len(rabbit_pos), 2):
+            rabbit = rabbit_pos[j:j+2]
+            if (hunter == rabbit).all():
+                rabbit_pos[j:j+2] = [-1, -1]
+                if remove_hunter: hunter_pos[i:i+2] = [-1, -1]
 
     # Return (s_next, reward, is_end)
     s_next = np.concatenate((hunter_pos, rabbit_pos))
     is_end = (rabbit_pos == -1).all()
     return s_next, -1, is_end
+
+def opposite_direction(s, a, i):
+    '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid
+       the closest hunter (after hunters take action a).
+    '''
+    # Calculate hunter positions after a
+    hunter_s = np.array(s[:2*k])
+    for j in range(2*k):
+        if hunter_s[j] == -1:
+            continue
+        elif 0 <= hunter_s[j] + a[j] < n:
+            hunter_s[j] += a[j]
+
+    # Find position of closest hunter
+    rabbit = s[i:i+2]
+    distance = float('inf')
+    for j in range(0, 2*k, 2):
+        d = np.linalg.norm(rabbit - s[j:j+2])
+        if d < distance:
+            closest_hunter = s[j:j+2]
+    
+    # Calculate opposite direction
+    return np.sign(rabbit - closest_hunter)
+
