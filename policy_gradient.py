@@ -119,7 +119,7 @@ def build_policy_network():
 # TODO: make this not hardcoded to this architecture, input output dims and such
 def compile_gradient_functions(model):
     '''Compiles a Theano function that calculates grad_W(sum(log(p_t))) for all
-       parameters W of the LSTM, given specific inputs into the LSTM (input_1, 
+       parameters W of the LSTM, given specific inputs into the LSTM (input_1,
        input_2) and the selected actions (index_v, index_h).
 
        Parameters:
