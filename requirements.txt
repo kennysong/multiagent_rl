@@ -7,5 +7,3 @@ PyYAML==3.12
 scipy==0.18.1
 six==1.10.0
 Theano==0.8.2
-torchvision==0.1.7
-https://s3.amazonaws.com/pytorch/whl/torch-0.1.8.post1-cp27-none-macosx_10_7_x86_64.whl
