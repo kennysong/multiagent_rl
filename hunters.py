@@ -4,7 +4,8 @@
 
     Hunters and rabbits are initialized randomly on the grid, with overlaps.
     An episode ends when all rabbits have been captured. Rabbits can have
-    different movement patterns. There is a reward of -1 per time step.
+    different movement patterns. There is a reward of -1 per time step (and
+    optionally a +1 reward on capturing a rabbit).
 
     States are size 2*k+2*m flattened arrays of:
       concat(hunter positions, rabbit positions)
@@ -19,9 +20,9 @@
 
 import numpy as np
 
-n = 6  # grid size
-k = 3  # hunters
-m = 3  # rabbits
+n = 8  # grid size
+k = 2  # hunters
+m = 2  # rabbits
 
 def initial_state():
     '''Returns a random initial state. The state vector is a flat array of:
@@ -36,7 +37,8 @@ def valid_action(a):
     '''Returns if the given action vector is valid'''
     return a.shape == (2*k, ) and np.all([-1 <= e <= 1 for e in a])
 
-def perform_action(s, a, rabbit_action=None, remove_hunter=False):
+def perform_action(s, a, rabbit_action=None, remove_hunter=False, 
+                   capture_reward=False):
     '''Performs action a in state s.
 
        Parameters:
@@ -47,6 +49,7 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False):
          'random': rabbits move one block randomly
          'opposite': rabbits move opposite to the closest hunter
        remove_hunter will remove the first hunter that captures a rabbit
+       capture_reward will give a reward of +1 if a rabbit is captured
 
        Returns:
        (s_next, reward, is_end)'''
@@ -78,19 +81,21 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False):
             positions[i] = s[i]
 
     # Remove rabbits (and optionally hunters) that overlap
+    reward = -1
     hunter_pos, rabbit_pos = positions[:2*k], positions[2*k:]
     for i in range(0, len(hunter_pos), 2):
         hunter = hunter_pos[i:i+2]
         for j in range(0, len(rabbit_pos), 2):
             rabbit = rabbit_pos[j:j+2]
-            if (hunter == rabbit).all():
+            if np.array_equal(hunter, rabbit) and hunter[0] != -1:
                 rabbit_pos[j:j+2] = [-1, -1]
+                if capture_reward: reward += 1
                 if remove_hunter: hunter_pos[i:i+2] = [-1, -1]
 
     # Return (s_next, reward, is_end)
     s_next = np.concatenate((hunter_pos, rabbit_pos))
     is_end = (rabbit_pos == -1).all()
-    return s_next, -1, is_end
+    return s_next, reward, is_end
 
 def opposite_direction(s, a, i):
     '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid
@@ -114,4 +119,21 @@ def opposite_direction(s, a, i):
 
     # Calculate opposite direction
     return np.sign(rabbit - closest_hunter)
+
+index_to_coordinates = [
+    np.array([-1, -1]), np.array([-1, 0]), np.array([-1, 1]),
+    np.array([0, -1]), np.array([0, 0]), np.array([0, 1]),
+    np.array([1, -1]), np.array([1, 0]), np.array([1, 1])
+]
+
+def action_index_to_coordinates(index):
+    '''Converts an action index 0-8 to a coordinate action vector.'''
+    assert 0 <= index <= 8
+    return index_to_coordinates[index]
+
+def action_coordinates_to_index(coords):
+    '''Converts a coordinate action vector to an index 0-8.'''
+    assert -1 <= coords[0] <= 1 and -1 <= coords[1] <= 1
+    matches = [np.array_equal(coords, c) for c in index_to_coordinates]
+    return matches.index(True)
 
