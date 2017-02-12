@@ -20,7 +20,7 @@
 
 import numpy as np
 
-n = 8  # grid size
+n = 6  # grid size
 k = 2  # hunters
 m = 2  # rabbits
 
@@ -120,20 +120,68 @@ def opposite_direction(s, a, i):
     # Calculate opposite direction
     return np.sign(rabbit - closest_hunter)
 
-index_to_coordinates = [
+## Functions to convert action representations ## 
+
+action_index_to_coords = [
     np.array([-1, -1]), np.array([-1, 0]), np.array([-1, 1]),
     np.array([0, -1]), np.array([0, 0]), np.array([0, 1]),
     np.array([1, -1]), np.array([1, 0]), np.array([1, 1])
 ]
 
 def action_index_to_coordinates(index):
-    '''Converts an action index 0-8 to a coordinate action vector.'''
+    '''Converts an action index 0 to 8 to an agent's coordinate action vector.'''
     assert 0 <= index <= 8
-    return index_to_coordinates[index]
+    return action_index_to_coords[index]
 
 def action_coordinates_to_index(coords):
-    '''Converts a coordinate action vector to an index 0-8.'''
+    '''Converts an agent's coordinate action vector to an index 0 to 8.'''
     assert -1 <= coords[0] <= 1 and -1 <= coords[1] <= 1
-    matches = [np.array_equal(coords, c) for c in index_to_coordinates]
+    matches = [np.array_equal(coords, c) for c in action_index_to_coords]
     return matches.index(True)
 
+## Functions to convert state representations ##
+
+state_index_to_coords = [np.array((col, row)) for col in range(n) 
+                                              for row in range(n)] + \
+                        [np.array((-1, -1))]
+
+def state_index_to_coordinates(index):
+    '''Converts a state index 0 to (n*n-1) to an agent's coordinate vector.'''
+    assert 0 <= index < n*n
+    return state_index_to_coords[index]
+
+def state_coordinates_to_index(coords):
+    '''Converts an agent's coordinate vector to an index 0 to (n*n-1).'''
+    assert -1 <= coords[0] < n and -1 <= coords[1] < n
+    matches = [np.array_equal(coords, c) for c in state_index_to_coords]
+    return matches.index(True)
+
+def state_coordinates_to_kmhot(state):
+    '''Converts a coordinate state vector to a (k+m)-hot state vector.'''
+    onehots = []
+    for i in range(k+m):
+        s = state[2*i:2*i+2]
+        if np.array_equal(s, np.array([-1, -1])):
+            # All zero vector corresponds to [-1, -1]
+            onehots.append(np.zeros(n*n))
+        else:
+            index = state_coordinates_to_index(s)
+            onehot = np.zeros(n*n)
+            onehot[index] = 1
+            onehots.append(onehot)
+    return np.concatenate(onehots)
+
+def state_kmhot_to_coordinates(kmhot):
+    '''Converts a (k+m)-hot state vector to a coordinate state vector.'''
+    coords = []
+    for i in range(k+m):
+        onehot = kmhot[i*(n*n):(i+1)*(n*n)]
+        where = np.where(onehot == 1)
+        if len(where[0]) == 0:
+            # All zero vector corresponds to [-1, -1]
+            coords.append(np.array([-1, -1]))
+        else:
+            index = where[0][0]
+            state = state_index_to_coordinates(index)
+            coords.append(state)
+    return np.concatenate(coords)

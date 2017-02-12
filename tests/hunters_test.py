@@ -41,4 +41,4 @@ if __name__ == '__main__':
         reward += r
 
         # Clears and overwrites previous lines
-        sys.stdout.write('\033[K\033[F' * 8)
+        sys.stdout.write('\033[K\033[F' * 10)

@@ -26,7 +26,7 @@ def run_episode(policy_net, gamma=1):
          G_{t+1} is the discounted return received from that state-action pair.
     '''
     # Initialize hunters environment state
-    state = hunters.initial_state()
+    state = hunters.state_coordinates_to_kmhot(hunters.initial_state())
     is_end = False
     episode = []
 
@@ -36,7 +36,9 @@ def run_episode(policy_net, gamma=1):
         action, probs = run_policy_network(policy_net, state)
 
         # Take that action, then environment gives us the next state and reward
-        next_s, reward, is_end = hunters.perform_action(state, action, remove_hunter=True, capture_reward=True)
+        coords_state = hunters.state_kmhot_to_coordinates(state)
+        next_s, reward, is_end = hunters.perform_action(coords_state, action, remove_hunter=True, capture_reward=True)
+        next_s = hunters.state_coordinates_to_kmhot(next_s)
 
         # Record [(state, action, probs), reward]
         episode.append([(state, action, probs), reward])
@@ -54,7 +56,7 @@ def build_value_network():
     '''Builds an MLP value function approximator, which maps states to scalar
        values. It has one hidden layer with 32 units and relu activations.
     '''
-    layers = [8, 32, 1]
+    layers = [(hunters.n**2) * (hunters.k + hunters.m), 256, 1]
     model = Sequential()
     model.add(Dense(layers[1], input_dim=layers[0], activation='tanh')) # Relus throw nans.
     model.add(Dense(layers[2]))
@@ -97,7 +99,7 @@ def build_policy_network():
 
        So, the LSTM has 10 input nodes and 9 output nodes.
     '''
-    layers = [10, 64, 9]
+    layers = [(hunters.n**2) * (hunters.k + hunters.m) + 2, 256, 9]
     model = Sequential()
 
     # We use a stateful LSTM layer to be able to predict each agent's action
@@ -124,8 +126,8 @@ def compile_gradient_functions(model):
     index_h1 = T.iscalar()
     index_h2 = T.iscalar()
 
-    input_1 = Input(shape=(1, 10,)) #TODO: Check that this is okay. I think it adds an extra batch_size dim to the first one so it's okay.
-    input_2 = Input(shape=(1, 10,))
+    input_1 = Input(shape=(1, (hunters.n**2) * (hunters.k + hunters.m) + 2,))
+    input_2 = Input(shape=(1, (hunters.n**2) * (hunters.k + hunters.m) + 2,))
 
     dist_h1 = model(input_1)
     log_p_t_h1 = T.log(dist_h1[0, index_h1]) # First dimension is over samples in batch so = 1
@@ -170,8 +172,8 @@ def train_policy_network(model, episode, get_gradients, baseline=None, lr=3*1e-3
         index_h1 = hunters.action_coordinates_to_index(a_t[:2])
         index_h2 = hunters.action_coordinates_to_index(a_t[2:])
 
-        input_h1 = np.concatenate((np.zeros(2), s_t)).reshape(1, 1, 10)
-        input_h2 = np.concatenate((a_t[:2], s_t)).reshape(1, 1, 10)
+        input_h1 = np.concatenate((np.zeros(2), s_t)).reshape(1, 1, (hunters.n**2) * (hunters.k + hunters.m) + 2)
+        input_h2 = np.concatenate((a_t[:2], s_t)).reshape(1, 1, (hunters.n**2) * (hunters.k + hunters.m) + 2)
 
         # Is this the place to reset states?
         model.reset_states()
@@ -209,14 +211,14 @@ def run_policy_network(model, state):
     model.reset_states()
 
     # Predict action for the first hunter and its probability
-    initial_input = np.concatenate((np.zeros(2), state)).reshape(1, 1, 10)
+    initial_input = np.concatenate((np.zeros(2), state)).reshape(1, 1, (hunters.n**2) * (hunters.k + hunters.m) + 2)
     dist_h1 = model.predict(initial_input)[0]
     index_h1 = np.random.choice(range(len(dist_h1)), p=dist_h1)
     p_h1 = dist_h1[index_h1]
     a_h1 = hunters.action_index_to_coordinates(index_h1)
 
     # Predict action for the horizontal agent and its probability
-    second_input = np.concatenate((a_h1, state)).reshape(1, 1, 10)
+    second_input = np.concatenate((a_h1, state)).reshape(1, 1, (hunters.n**2) * (hunters.k + hunters.m) + 2)
     dist_h2 = model.predict(second_input)[0]
     index_h2 = np.random.choice(range(len(dist_h2)), p=dist_h2)
     p_h2 = dist_h2[index_h2]
