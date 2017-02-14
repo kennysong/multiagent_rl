@@ -37,7 +37,7 @@ def valid_action(a):
     '''Returns if the given action vector is valid'''
     return a.shape == (2*k, ) and np.all([-1 <= e <= 1 for e in a])
 
-def perform_action(s, a, rabbit_action=None, remove_hunter=False, 
+def perform_action(s, a, rabbit_action=None, remove_hunter=False,
                    capture_reward=False):
     '''Performs action a in state s.
 
@@ -120,7 +120,7 @@ def opposite_direction(s, a, i):
     # Calculate opposite direction
     return np.sign(rabbit - closest_hunter)
 
-## Functions to convert action representations ## 
+## Functions to convert action representations ##
 
 action_index_to_coords = [
     np.array([-1, -1]), np.array([-1, 0]), np.array([-1, 1]),
@@ -129,29 +129,29 @@ action_index_to_coords = [
 ]
 
 def action_index_to_coordinates(index):
-    '''Converts an action index 0 to 8 to an agent's coordinate action vector.'''
+    '''Converts an action index 0 to 8 to an agent's action coordinates.'''
     assert 0 <= index <= 8
     return action_index_to_coords[index]
 
 def action_coordinates_to_index(coords):
-    '''Converts an agent's coordinate action vector to an index 0 to 8.'''
+    '''Converts an agent's action coordinates to an index 0 to 8.'''
     assert -1 <= coords[0] <= 1 and -1 <= coords[1] <= 1
     matches = [np.array_equal(coords, c) for c in action_index_to_coords]
     return matches.index(True)
 
 ## Functions to convert state representations ##
 
-state_index_to_coords = [np.array((col, row)) for col in range(n) 
+state_index_to_coords = [np.array((col, row)) for col in range(n)
                                               for row in range(n)] + \
                         [np.array((-1, -1))]
 
 def state_index_to_coordinates(index):
-    '''Converts a state index 0 to (n*n-1) to an agent's coordinate vector.'''
+    '''Converts a state index 0 to (n*n-1) to an agent's state coordinates.'''
     assert 0 <= index < n*n
     return state_index_to_coords[index]
 
 def state_coordinates_to_index(coords):
-    '''Converts an agent's coordinate vector to an index 0 to (n*n-1).'''
+    '''Converts an agent's state coordinates to an index 0 to (n*n-1).'''
     assert -1 <= coords[0] < n and -1 <= coords[1] < n
     matches = [np.array_equal(coords, c) for c in state_index_to_coords]
     return matches.index(True)
