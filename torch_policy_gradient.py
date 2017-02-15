@@ -10,6 +10,9 @@ import torch
 
 from torch.autograd import Variable
 
+# To run on GPU, change this boolean to True
+cuda = False
+
 # def run_episode(policy_net, gamma=1):
 def run_episode(gamma=1):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
@@ -62,6 +65,7 @@ def build_value_network():
               torch.nn.Tanh(),
               torch.nn.Linear(layers[1], layers[2])
             )
+    if cuda: value_net.cuda()
     return value_net
 
 def train_value_network(value_net, episode):
@@ -77,6 +81,10 @@ def train_value_network(value_net, episode):
     # Parse episode data into Numpy arrays of states and returns
     states = Variable(torch.Tensor([t[0][0] for t in episode]))
     returns = Variable(torch.Tensor([t[2] for t in episode]))
+
+    if cuda:
+        states = states.cuda()
+        returns = returns.cuda()
 
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
@@ -94,7 +102,10 @@ def train_value_network(value_net, episode):
 def run_value_network(value_net, state):
     '''Wrapper function to feed one state into the given value network and
        return the value as a torch.Tensor.'''
-    result = value_net(Variable(torch.Tensor([state])))
+    if cuda:
+        result = value_net(Variable(torch.Tensor([state])).cuda())
+    else:
+        result = value_net(Variable(torch.Tensor([state])))
     return result.data
 
 value_net = build_value_network()
