@@ -61,10 +61,10 @@ def build_value_network():
     '''
     layers = [2, 32, 1]
     value_net = torch.nn.Sequential(
-              torch.nn.Linear(layers[0], layers[1]),
-              torch.nn.Tanh(),
-              torch.nn.Linear(layers[1], layers[2])
-            )
+                  torch.nn.Linear(layers[0], layers[1]),
+                  torch.nn.Tanh(),
+                  torch.nn.Linear(layers[1], layers[2])
+                )
     if cuda: value_net.cuda()
     return value_net
 
@@ -108,8 +108,74 @@ def run_value_network(value_net, state):
         result = value_net(Variable(torch.Tensor([state])))
     return result.data
 
-value_net = build_value_network()
-for i in range(1000):
-    episode = run_episode()
-    loss = train_value_network(value_net, episode)
-    print(i, loss)
+# TODO: policy network on GPU
+
+def build_policy_network():
+    '''Builds an LSTM policy network, which maps states to action vectors.
+
+       More precisely, the input into the LSTM will be a 5-D vector consisting
+       of [prev_output, state]. The output of the LSTM will be a 3-D vector that
+       gives softmax probabilities of each action for the agents. This model
+       only handles one time step, i.e. one agent, so it must be manually
+       re-run for every agent.
+    '''
+
+    class PolicyNet(torch.nn.Module):
+        def __init__(self, layers):
+            super(PolicyNet, self).__init__()
+            self.lstm = torch.nn.LSTMCell(layers[0], layers[1])
+            self.linear = torch.nn.Linear(layers[1], layers[2])
+            self.softmax = torch.nn.Softmax()
+
+        def forward(self, x, h0, c0):
+            h1, c1 = self.lstm(x, (h0, c0))
+            o1 = self.softmax(self.linear(h1))
+            return o1, h1, c1
+
+    layers = [5, 32, 3]
+    policy_net = PolicyNet(layers)
+    return policy_net
+
+def run_policy_network(policy_net, state):
+    '''Wrapper function to feed a given state into the given policy network and
+       return the action [a_v, a_h], as well as the softmax probability of each
+       action [p_v, p_h].
+
+       The initial input into the LSTM will be concat([0, 0, 0], state). This
+       will output the softmax probabilities for the 3 vertical actions. We
+       select one as a_v, a one-hot vector. The second input into the LSTM will
+       be concat(a_v, state), which will output softmax probabilities for the 3
+       horizontal actions. We select one as a_h.
+
+       The output action [a_v, a_h] is transformed into a coordinate
+       action vector, e.g. [-1, 1], instead of the one-hot vectors.
+    '''
+
+    actions = [-1, 0, 1]
+
+    # TODO: What should h0, c0 be?
+    # Predict action for the vertical agent and its probability
+    initial_input = Variable(torch.Tensor(
+                        np.append(np.zeros(3), state).reshape(1, 5)
+                    ))
+    h0, c0 = Variable(torch.zeros(1, 32)), Variable(torch.zeros(1, 32))
+    dist_v, h1, c1 = policy_net(initial_input, h0, c0)
+    index_v = np.random.choice(range(len(dist_v[0])), p=dist_v[0].data.numpy())
+    p_v = dist_v.data[0][index_v]
+    a_v = actions[index_v]
+
+    # Convert a_v to a one-hot vector
+    onehot_v = np.zeros(len(dist_v[0]))
+    onehot_v[index_v] = 1
+
+    # Predict action for the horizontal agent and its probability
+    second_input = Variable(torch.Tensor(
+                       np.append(onehot_v, state).reshape(1, 5)
+                   ))
+    dist_h, _, _ = policy_net(second_input, h1, c1)
+    index_h = np.random.choice(range(len(dist_h[0])), p=dist_h[0].data.numpy())
+    p_h = dist_h.data[0][index_h]
+    a_h = actions[index_v]
+
+    return np.array([a_v, a_h]), np.array([p_v, p_h])
+
