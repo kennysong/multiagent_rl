@@ -10,11 +10,11 @@ import torch
 
 from torch.autograd import Variable
 
+# TODO: Make policy_net work on GPU
 # To run on GPU, change this boolean to True
 cuda = False
 
-# def run_episode(policy_net, gamma=1):
-def run_episode(gamma=1):
+def run_episode(policy_net, gamma=1):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
        which is a LSTM that mapping states to actions, and returns the
        probabilities of those actions. gamma is the discount factor.
@@ -33,19 +33,14 @@ def run_episode(gamma=1):
     # Run Gridworld until episode terminates at the goal
     while not np.array_equal(state, gridworld.goal):
         # Let our agent decide that to do at this state
-        # action, probs = run_policy_network(policy_net, state)
-        action, probs = random.choice(gridworld.action_space), 0
+        action, grads = run_policy_network(policy_net, state)
 
         # Take that action, then environment gives us the next state and reward
         next_s, reward = gridworld.perform_action(state, action)
 
         # Record [(state, action, probs), reward]
-        episode.append([(state, action, probs), reward])
+        episode.append([(state, action, grads), reward])
         state = next_s
-
-        # This is taking ages
-        if len(episode) > 100:
-            break
 
     # We have the reward from each (state, action), now calculate the return
     T = len(episode)
@@ -108,8 +103,6 @@ def run_value_network(value_net, state):
         result = value_net(Variable(torch.Tensor([state])))
     return result.data
 
-# TODO: policy network on GPU
-
 def build_policy_network():
     '''Builds an LSTM policy network, which maps states to action vectors.
 
@@ -119,7 +112,6 @@ def build_policy_network():
        only handles one time step, i.e. one agent, so it must be manually
        re-run for every agent.
     '''
-
     class PolicyNet(torch.nn.Module):
         def __init__(self, layers):
             super(PolicyNet, self).__init__()
@@ -150,7 +142,6 @@ def run_policy_network(policy_net, state):
        The output action [a_v, a_h] is transformed into a coordinate
        action vector, e.g. [-1, 1], instead of the one-hot vectors.
     '''
-
     actions = [-1, 0, 1]
 
     # TODO: What should h0, c0 be?
@@ -158,24 +149,89 @@ def run_policy_network(policy_net, state):
     initial_input = Variable(torch.Tensor(
                         np.append(np.zeros(3), state).reshape(1, 5)
                     ))
-    h0, c0 = Variable(torch.zeros(1, 32)), Variable(torch.zeros(1, 32))
+    h0, c0 = Variable(torch.randn(1, 32)), Variable(torch.randn(1, 32))
     dist_v, h1, c1 = policy_net(initial_input, h0, c0)
     index_v = np.random.choice(range(len(dist_v[0])), p=dist_v[0].data.numpy())
-    p_v = dist_v.data[0][index_v]
     a_v = actions[index_v]
 
     # Convert a_v to a one-hot vector
     onehot_v = np.zeros(len(dist_v[0]))
     onehot_v[index_v] = 1
 
+    # Calculate grad_W(log(p_v)), for all parameters W
+    p_v = dist_v[0][index_v]
+    log_p_v = p_v.log()
+    policy_net.zero_grad()
+    log_p_v.backward()
+    grad_log_p_v = [W.grad.data for W in policy_net.parameters()]
+
+    # Hack to unlink h1, c1 from the previous computational graph (TODO: I think)
+    h1 = Variable(h1.data)
+    c1 = Variable(c1.data)
+
     # Predict action for the horizontal agent and its probability
+    policy_net.zero_grad()
     second_input = Variable(torch.Tensor(
                        np.append(onehot_v, state).reshape(1, 5)
                    ))
     dist_h, _, _ = policy_net(second_input, h1, c1)
     index_h = np.random.choice(range(len(dist_h[0])), p=dist_h[0].data.numpy())
-    p_h = dist_h.data[0][index_h]
-    a_h = actions[index_v]
+    a_h = actions[index_h]
 
-    return np.array([a_v, a_h]), np.array([p_v, p_h])
+    # Calculate grad_W(log(p_h)), for all parameters W
+    p_h = dist_h[0][index_h]
+    log_p_h = p_h.log()
+    policy_net.zero_grad()
+    log_p_h.backward()
+    grad_log_p_h = [W.grad.data for W in policy_net.parameters()]
 
+    grads = [grad_log_p_v[i] + grad_log_p_h[i] for i in range(len(grad_log_p_v))]
+
+    return np.array([a_v, a_h]), grad_log_p_v + grad_log_p_h
+
+def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
+    '''Update the policy network parameters with the REINFORCE algorithm.
+
+       For each parameter W of the policy network, we make the following update:
+         W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
+            = alpha * [grad_W(sum(log(p_t))) * (G_t - baseline(s_t))]
+            = alpha * [sum(grad_W(log(p_t))) * (G_t - baseline(s_t))]
+       for all time steps in the episode.
+
+       Parameters:
+       model is our LSTM policy network
+       episode is an list of episode data, see run_episode()
+       baseline is our MLP value network
+    '''
+
+    # Calculate baseline values for each step in the episode
+    # if baseline is not None:
+    #     state_batch = Variable(torch.Tensor([step[0][0] for step in episode]))
+    #     baseline_predicts = baseline(state_batch)
+
+    # Accumulate the update terms for each step in the episode into w_step
+    W_step = [torch.zeros(W.size()) for W in policy_net.parameters()]
+    for t, data in enumerate(episode):
+        s_t, G_t, grad_W = data[0][0], data[2], data[0][2]
+        for i in range(len(W_step)):
+            if baseline:
+                W_step[i] += grad_W[i] * (G_t - baseline(s_t))
+            else:
+                W_step[i] += grad_W[i] * G_t
+
+    # Do a step of rprop
+    for i, W in enumerate(policy_net.parameters()):
+        W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
+
+policy_net = build_policy_network()
+value_net = build_value_network()
+
+cum_value_error = 0.0
+cum_return = 0.0
+for num_episode in range(50000):
+    episode = run_episode(policy_net, gamma=1)
+    value_error = train_value_network(value_net, episode)
+    cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
+    cum_return = 0.9 * cum_return + 0.1 * episode[0][2]
+    print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error)) # Print episode return
+    train_policy_network(policy_net, episode, baseline=None)
