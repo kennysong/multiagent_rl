@@ -28,6 +28,8 @@ action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
 start, goal = np.array((0, 0)), np.array((0, grid_x-1))
 cliff_states = [np.array((0, x)) for x in range(1, grid_x-1)]
 
+num_agents = 2
+
 def P(s, s_next, a):
     '''The transition probabilities. Returns:
        P[s_{t+1} = s_next | s_t = s, a_t = a]'''
