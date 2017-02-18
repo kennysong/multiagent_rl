@@ -154,13 +154,19 @@ def run_policy_network(policy_net, state):
     actions = [-1, 0, 1]
     a_n = np.zeros(3)
     h_n, c_n = Variable(torch.zeros(1, 32)), Variable(torch.zeros(1, 32))
+    if cuda: h_n, c_n = h_n.cuda(), c_n.cuda()
     action = []
-    grad_W = [torch.zeros(W.size()) for W in policy_net.parameters()]
+    if cuda:
+        grad_W = [torch.zeros(W.size()).cuda() for W in policy_net.parameters()]
+    else:
+        grad_W = [torch.zeros(W.size()) for W in policy_net.parameters()]
+
 
     # Use policy_net to predict output for each agent
     for n in range(gridworld.num_agents):
         # Predict action for the agent
         x_n = Variable(torch.Tensor(np.append(a_n, state).reshape(1, 5)))
+        if cuda: x_n = x_n.cuda()
         dist, h_nn, c_nn = policy_net(x_n, h_n, c_n)
         a_index = np.random.choice(range(len(dist[0])), p=dist[0].data.numpy())
 
@@ -177,6 +183,7 @@ def run_policy_network(policy_net, state):
         # Prepare inputs for next iteration/agent
         h_n = Variable(h_nn.data)
         c_n = Variable(c_nn.data)
+        if cuda: h_n, c_n = h_n.cuda(), c_n.cuda()
         a_n = np.zeros(3)
         a_n[a_index] = 1
 
@@ -200,7 +207,10 @@ def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
        baseline is our MLP value network
     '''
     # Accumulate the update terms for each step in the episode into w_step
-    W_step = [torch.zeros(W.size()) for W in policy_net.parameters()]
+    if cuda:
+        W_step = [torch.zeros(W.size()).cuda() for W in policy_net.parameters()]
+    else:
+        W_step = [torch.zeros(W.size()) for W in policy_net.parameters()]
     for t, data in enumerate(episode):
         s_t, G_t, grad_W = data[0][0], data[2], data[0][2]
         for i in range(len(W_step)):
