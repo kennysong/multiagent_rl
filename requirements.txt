@@ -4,6 +4,7 @@ numpy==1.11.3
 olefile==0.44
 Pillow==4.0.0
 PyYAML==3.12
+namedlist==1.7
 scipy==0.18.1
 six==1.10.0
 Theano==0.8.2
