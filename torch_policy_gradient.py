@@ -142,7 +142,7 @@ def run_policy_network(policy_net, state):
        computed and returned. This is used in the REINFORCE algorithm; see
        train_policy_network().
     '''
-    # TODO: What should h_0, c_0 be?
+    # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
     actions = [-1, 0, 1]
     a_n = np.zeros(3)
