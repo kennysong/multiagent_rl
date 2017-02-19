@@ -6,12 +6,17 @@
 import gridworld
 import numpy as np
 import random
-import theano
-import theano.tensor as T
-import keras
+import torch
 
-from keras.models import Sequential
-from keras.layers import Dense, LSTM, Input
+from namedlist import namedlist
+from torch.autograd import Variable
+
+# TODO(Martin): Review GPU code, is running suspiciously slowly
+# To run on GPU, change `cuda` to True
+cuda = False
+if cuda: print('Running policy gradient on GPU.')
+FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
+ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
 
 def run_episode(policy_net, gamma=1):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
@@ -19,12 +24,15 @@ def run_episode(policy_net, gamma=1):
        probabilities of those actions. gamma is the discount factor.
 
        Returns:
-       [[(s_0, a_0, p_0), r_1, G_1], ..., [(s_{T-1}, a_{T-1}, p_{T-1}), r_T, G_T]]
-         s_t, a_t is each state-action pair visited during the episode.
-         p_t is the probability of taking a_t from s_t, given by the policy.
-         r_{t+1} is the reward received from that state-action pair.
-         G_{t+1} is the discounted return received from that state-action pair.
+       [EpisodeStep(t=0), ..., EpisodeStep(t=T)]
     '''
+    # Define a EpisodeStep container for each step in the episode:
+    #   s, a is the state-action pair visited during that step
+    #   grad_W is gradient term sum(grad_W(log(p))); see train_policy_network()
+    #   r is the reward received from that state-action pair
+    #   G is the discounted return received from that state-action pair
+    EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
+
     # Initialize state as player position
     state = gridworld.start
     episode = []
@@ -32,13 +40,13 @@ def run_episode(policy_net, gamma=1):
     # Run Gridworld until episode terminates at the goal
     while not np.array_equal(state, gridworld.goal):
         # Let our agent decide that to do at this state
-        action, probs = run_policy_network(policy_net, state)
+        action, grad_W = run_policy_network(policy_net, state)
 
         # Take that action, then environment gives us the next state and reward
         next_s, reward = gridworld.perform_action(state, action)
 
-        # Record [(state, action, probs), reward]
-        episode.append([(state, action, probs), reward])
+        # Record state, action, grad_W, reward
+        episode.append(EpisodeStep(s=state, a=action, grad_W=grad_W, r=reward))
         state = next_s
 
         # This is taking ages
@@ -47,208 +55,170 @@ def run_episode(policy_net, gamma=1):
 
     # We have the reward from each (state, action), now calculate the return
     T = len(episode)
-    for i in range(T):
-        ret = sum(gamma**(j-i) * episode[j][1] for j in range(i, T))
-        episode[i].append(ret)
+    for i, step in enumerate(episode):
+        step.G = sum(gamma**(j-i) * episode[j].r for j in range(i, T))
 
     return episode
 
 def build_value_network():
     '''Builds an MLP value function approximator, which maps states to scalar
-       values. It has one hidden layer with 10 units and relu activations.
+       values. It has one hidden layer with 32 units and tanh activations.
     '''
     layers = [2, 32, 1]
-    model = Sequential()
-    model.add(Dense(layers[1], input_dim=layers[0], activation='tanh')) # Relus throw nans.
-    model.add(Dense(layers[2]))
+    value_net = torch.nn.Sequential(
+                  torch.nn.Linear(layers[0], layers[1]),
+                  torch.nn.Tanh(),
+                  torch.nn.Linear(layers[1], layers[2]))
+    return value_net.cuda() if cuda else value_net
 
-    opt = keras.optimizers.RMSprop(lr=1e-3, epsilon=1e-5)
-    model.compile(optimizer=opt, loss='mae') # MSE was throwing nans
-    return model
-
-def train_value_network(model, episode):
+def train_value_network(value_net, episode):
     '''Trains an MLP value function approximator based on the output of one
        episode. The value network will map states to scalar values.
 
        Parameters:
-       episode is an list of episode data, see run_episode()
+       episode is a list of EpisodeStep's
 
        Returns:
-       The trained value network as a Keras Model.
+       The scalar loss of the newly trained value network.
     '''
     # Parse episode data into Numpy arrays of states and returns
-    states = np.array([t[0][0] for t in episode])
-    returns = np.array([t[2] for t in episode])
+    states = Variable(FloatTensor([step.s for step in episode]))
+    returns = Variable(FloatTensor([step.G for step in episode]))
 
-    # Train the MLP model on states, returns
-    error = model.train_on_batch(states, returns)
+    # Define loss function and optimizer
+    loss_fn = torch.nn.L1Loss()
+    optimizer = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
-    return error
+    # Train the value network on states, returns
+    optimizer.zero_grad()
+    pred_returns = value_net(states)
+    loss = loss_fn(pred_returns, returns)
+    loss.backward()
+    optimizer.step()
 
+    return loss.data[0]
 
-def run_value_network(model, state):
-    '''Wrapper function to feed a given state into the given value network and
-       return the value.'''
-    result = model.predict(np.array([state]))
-    return result[0][0]
+def run_value_network(value_net, state):
+    '''Wrapper function to feed one state into the given value network and
+       return the value as a scalar.'''
+    result = value_net(Variable(FloatTensor([state])))
+    return result.data[0][0]
 
 def build_policy_network():
     '''Builds an LSTM policy network, which maps states to action vectors.
 
        More precisely, the input into the LSTM will be a 5-D vector consisting
-       of prev_output + state. The output of the LSTM will be a 3-D vector that
-       gives softmax probabilities of each action for the agents.
-
-       So, the LSTM has 5 input nodes and 3 output nodes.
+       of [prev_output, state]. The output of the LSTM will be a 3-D vector that
+       gives softmax probabilities of each action for the agents. This model
+       only handles one time step, i.e. one agent, so it must be manually
+       re-run for every agent.
     '''
+    class PolicyNet(torch.nn.Module):
+        def __init__(self, layers):
+            super(PolicyNet, self).__init__()
+            self.lstm = torch.nn.LSTMCell(layers[0], layers[1])
+            self.linear = torch.nn.Linear(layers[1], layers[2])
+            self.softmax = torch.nn.Softmax()
+
+        def forward(self, x, h0, c0):
+            h1, c1 = self.lstm(x, (h0, c0))
+            o1 = self.softmax(self.linear(h1))
+            return o1, h1, c1
+
     layers = [5, 32, 3]
-    model = Sequential()
+    policy_net = PolicyNet(layers)
+    return policy_net.cuda() if cuda else policy_net
 
-    # We use a stateful LSTM layer to be able to predict each agent's action
-    # incrementally, by feeding 1 input with 1 time step of layers[0] features,
-    # which will output one agent's action
-    model.add(LSTM(layers[1], batch_input_shape=(1, 1, layers[0]), stateful=True))
-    model.add(Dense(layers[2], activation='softmax'))
+def run_policy_network(policy_net, state):
+    '''Wrapper function to feed a given state into the given policy network and
+       return an action vector, as well as parameter gradients.
 
-    # CHECK: We never use this loss function or optimizer, right? What should
-    # it be set to?
-    model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
+       Essentially, we run the policy_net LSTM for game.num_agents time-steps,
+       in order to get the action for each agent, conditioned on the actions of
+       the previous agents. As such, the input of the LSTM at time-step n is 
+       concat(a_{n-1}, state).
 
-    return model
-
-# TODO: make this not hardcoded to this architecture, input output dims and such
-def compile_gradient_functions(model):
-    '''Compiles a Theano function that calculates grad_W(sum(log(p_t))) for all
-       parameters W of the LSTM, given specific inputs into the LSTM (input_1,
-       input_2) and the selected actions (index_v, index_h).
-
-       Parameters:
-       model is our LSTM policy network
+       For each parameter W, the gradient term `sum(grad_W(log(p)))` is also 
+       computed and returned. This is used in the REINFORCE algorithm; see
+       train_policy_network().
     '''
-    index_v = T.iscalar()
-    index_h = T.iscalar()
+    # TODO(Martin): What should h_0, c_0 be?
+    # Prepare initial inputs for policy_net
+    actions = [-1, 0, 1]
+    a_n = np.zeros(3)
+    h_n, c_n = Variable(ZeroTensor(1, 32)), Variable(ZeroTensor(1, 32))
+    action = []
+    grad_W = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
-    input_1 = Input(shape=(1, 5,)) #TODO: Check that this is okay. I think it adds an extra batch_size dim to the first one so it's okay.
-    input_2 = Input(shape=(1, 5,))
+    # Use policy_net to predict output for each agent
+    for n in range(gridworld.num_agents):
+        # TODO(Martin): Why is renormalizing flat_dist necessary on CUDA?
+        # Predict action for the agent
+        x_n = Variable(FloatTensor(np.append(a_n, state).reshape(1, 5)))
+        dist, h_nn, c_nn = policy_net(x_n, h_n, c_n)
+        flat_dist = np.array(dist[0].data.tolist())
+        flat_dist /= sum(flat_dist)
+        a_index = np.random.choice(range(3), p=flat_dist)
 
-    dist_v = model(input_1)
-    log_p_t_v = T.log(dist_v[0, index_v]) # First dimension is over samples in batch so = 1
+        # Calculate grad_W(log(p)), for all parameters W
+        log_p = dist[0][a_index].log()
+        policy_net.zero_grad()
+        log_p.backward()
+        grad_log_p = [W.grad.data for W in policy_net.parameters()]
 
-    # TODO: I'm not massively sure the stateful is going through this but it should
-    # Where's the symbolic 'model.reset_states'?
-    dist_h = model(input_2)
-    log_p_t_h = T.log(dist_h[0, index_h])
+        # Track output of this iteration/agent
+        action.append(actions[a_index])
+        for i in range(len(grad_W)): grad_W[i] += grad_log_p[i]
 
-    log_p_t_sum = log_p_t_v + log_p_t_h
+        # Prepare inputs for next iteration/agent
+        h_n = Variable(h_nn.data)
+        c_n = Variable(c_nn.data)
+        a_n = np.zeros(3)
+        a_n[a_index] = 1
 
-    grads_log_p_t = [T.grad(log_p_t_sum, w) for w in model.weights]
+    return np.array(action), grad_W
 
-    get_gradients = theano.function([input_1, input_2, index_v, index_h], grads_log_p_t, allow_input_downcast=True)
-
-    return get_gradients
-
-def train_policy_network(model, episode, get_gradients, baseline=None, lr=3*1e-3):
+def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
-       For each parameter W of the policy network, we make the following update:
+       For each parameter W of the policy network, for each time-step t in the
+       episode, make the update:
          W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
-            = alpha * [grad_W(sum(log(p_t))) * (G_t - baseline(s_t))]
+            = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
+            = alpha * [sum(grad_W(log(p))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
+
+       (Note: The sum is over the number of agents, each with an associated p)
 
        Parameters:
        model is our LSTM policy network
-       episode is an list of episode data, see run_episode()
+       episode is an list of EpisodeStep's
        baseline is our MLP value network
     '''
-
-    w_step = [np.zeros(w.get_value().shape, dtype='float32') for w in model.weights]
-
-    if baseline is not None:
-        state_batch = np.asarray([data[0][0] for data in episode])
-        baseline_predicts = baseline.predict(state_batch)
-    for t, data in enumerate(episode):
-        s_t = data[0][0]
-        a_t = data[0][1]
-        G_t = data[2]
-
-        index_v = a_t[0] + 1 # There should be an action -> index function
-        index_h = a_t[1] + 1
-
-        input_1 = np.concatenate((np.zeros(3), s_t)).reshape(1, 1, 5)
-
-        onehot_v = np.zeros(3)
-        onehot_v[index_v] = 1
-        input_2 = np.concatenate((onehot_v, s_t)).reshape(1, 1, 5)
-
-        # Is this the place to reset states?
-        model.reset_states()
-        gradients = get_gradients(input_1, input_2, index_v, index_h)
-        model.reset_states() # Again to be safe
-
-        for i in range(len(w_step)):
-            if baseline == None:
-                w_step[i] += gradients[i] * G_t
+    # Accumulate the update terms for each step in the episode into w_step
+    W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+    for step in episode:
+        s_t, G_t, grad_W = step.s, step.G, step.grad_W
+        for i in range(len(W_step)):
+            if baseline:
+                W_step[i] += grad_W[i] * (G_t - baseline(s_t))
             else:
-                w_step[i] += gradients[i] * (G_t - baseline_predicts[t])
+                W_step[i] += grad_W[i] * G_t
 
-    # TODO: do rmsprop instead of rprop
-    for i, w in enumerate(model.weights):
-        w.set_value(w.get_value() + lr * w_step[i] / (np.abs(w_step[i]) + 1e-5))
+    # Do a step of rprop
+    for i, W in enumerate(policy_net.parameters()):
+        W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
 
-def run_policy_network(model, state):
-    '''Wrapper function to feed a given state into the given policy network and
-       return the action [a_v, a_h], as well as the softmax probability of each
-       action [p_v, p_h].
+policy_net = build_policy_network()
+value_net = build_value_network()
+baseline = lambda state: run_value_network(value_net, state)
 
-       The initial input into the LSTM will be concat([0, 0, 0], state). This
-       will output the softmax probabilities for the 3 vertical actions. We
-       select one as a_v, a one-hot vector. The second input into the LSTM will
-       be concat(a_v, state), which will output softmax probabilities for the 3
-       horizontal actions. We select one as a_h.
-
-       For simplicity, the output action [a_v, a_h] is transformed into a valid
-       action vector, e.g. [-1, 1], instead of the one-hot vectors.
-    '''
-
-    # Model is a stateful LSTM, so make sure the state is reset
-    assert model.stateful
-    model.reset_states()
-
-    # Predict action for the vertical agent and its probability
-    actions = [-1, 0, 1]
-    initial_input = np.concatenate((np.zeros(3), state)).reshape(1, 1, 5)
-    dist_v = model.predict(initial_input)[0]
-    index_v = np.random.choice(range(len(dist_v)), p=dist_v)
-    p_v = dist_v[index_v]
-    a_v = actions[index_v]
-
-    # Convert a_v to a one-hot vector
-    onehot_v = np.zeros(len(dist_v))
-    onehot_v[index_v] = 1
-
-    # Predict action for the horizontal agent and its probability
-    second_input = np.concatenate((onehot_v, state)).reshape(1, 1, 5)
-    dist_h = model.predict(second_input)[0]
-    index_h = np.random.choice(range(len(dist_h)), p=dist_h)
-    p_h = dist_h[index_h]
-    a_h = actions[index_h]
-
-    # Reset the states of the LSTM
-    model.reset_states()
-
-    return np.array([a_v, a_h]), np.array([p_v, p_h])
-
-if __name__ == '__main__':
-    policy_net = build_policy_network()
-    value_net = build_value_network()
-
-    get_gradients = compile_gradient_functions(policy_net)
-    cum_value_error = 0.0
-    cum_return = 0.0
-    for num_episode in range(50000):
-        episode = run_episode(policy_net, gamma=1)
-        value_error = train_value_network(value_net, episode)
-        cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
-        cum_return = 0.9 * cum_return + 0.1 * episode[0][2]
-        print("Num episode:{0} Return:{1} Baseline error:{2}".format(num_episode, cum_return, cum_value_error)) # Print episode return
-        train_policy_network(policy_net, episode, get_gradients, baseline=value_net)
+cum_value_error = 0.0
+cum_return = 0.0
+for num_episode in range(50000):
+    episode = run_episode(policy_net, gamma=1)
+    value_error = train_value_network(value_net, episode)
+    cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
+    cum_return = 0.9 * cum_return + 0.1 * episode[0].G
+    print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error)) # Print episode return
+    train_policy_network(policy_net, episode, baseline=baseline)
