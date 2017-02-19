@@ -1,0 +1,1 @@
+This is the old policy gradient code using Keras. They will all run as-is, although `policy_gradient.py` (for Gridworld) is the only one that really works. The old versions of the Gridworld and Hunters tasks are also copied here.
