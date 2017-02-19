@@ -10,9 +10,11 @@ import torch
 
 from torch.autograd import Variable
 
-# TODO: Make policy_net work on GPU
-# To run on GPU, change this boolean to True
+# TODO(Martin): Review GPU code, is running suspiciously slowly
+# To run on GPU, change `cuda` to True
 cuda = False
+FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
+ZeroTensor = lambda *s: torch.zeros(*s).cuda() if cuda else torch.zeros(*s)
 
 def run_episode(policy_net, gamma=1):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
@@ -67,8 +69,7 @@ def build_value_network():
                   torch.nn.Linear(layers[0], layers[1]),
                   torch.nn.Tanh(),
                   torch.nn.Linear(layers[1], layers[2]))
-    if cuda: value_net.cuda()
-    return value_net
+    return value_net.cuda() if cuda else value_net
 
 def train_value_network(value_net, episode):
     '''Trains an MLP value function approximator based on the output of one
@@ -81,12 +82,8 @@ def train_value_network(value_net, episode):
        The scalar loss of the newly trained value network.
     '''
     # Parse episode data into Numpy arrays of states and returns
-    states = Variable(torch.Tensor([t[0][0] for t in episode]))
-    returns = Variable(torch.Tensor([t[2] for t in episode]))
-
-    if cuda:
-        states = states.cuda()
-        returns = returns.cuda()
+    states = Variable(FloatTensor([t[0][0] for t in episode]))
+    returns = Variable(FloatTensor([t[2] for t in episode]))
 
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
@@ -104,10 +101,7 @@ def train_value_network(value_net, episode):
 def run_value_network(value_net, state):
     '''Wrapper function to feed one state into the given value network and
        return the value as a scalar.'''
-    if cuda:
-        result = value_net(Variable(torch.Tensor([state])).cuda())
-    else:
-        result = value_net(Variable(torch.Tensor([state])))
+    result = value_net(Variable(FloatTensor([state])))
     return result.data[0][0]
 
 def build_policy_network():
@@ -133,8 +127,7 @@ def build_policy_network():
 
     layers = [5, 32, 3]
     policy_net = PolicyNet(layers)
-    if cuda: policy_net.cuda()
-    return policy_net
+    return policy_net.cuda() if cuda else policy_net
 
 def run_policy_network(policy_net, state):
     '''Wrapper function to feed a given state into the given policy network and
@@ -153,22 +146,19 @@ def run_policy_network(policy_net, state):
     # Prepare initial inputs for policy_net
     actions = [-1, 0, 1]
     a_n = np.zeros(3)
-    h_n, c_n = Variable(torch.zeros(1, 32)), Variable(torch.zeros(1, 32))
-    if cuda: h_n, c_n = h_n.cuda(), c_n.cuda()
+    h_n, c_n = Variable(ZeroTensor(1, 32)), Variable(ZeroTensor(1, 32))
     action = []
-    if cuda:
-        grad_W = [torch.zeros(W.size()).cuda() for W in policy_net.parameters()]
-    else:
-        grad_W = [torch.zeros(W.size()) for W in policy_net.parameters()]
-
+    grad_W = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
     # Use policy_net to predict output for each agent
     for n in range(gridworld.num_agents):
+        # TODO(Martin): Why is renormalizing flat_dist necessary on CUDA?
         # Predict action for the agent
-        x_n = Variable(torch.Tensor(np.append(a_n, state).reshape(1, 5)))
-        if cuda: x_n = x_n.cuda()
+        x_n = Variable(FloatTensor(np.append(a_n, state).reshape(1, 5)))
         dist, h_nn, c_nn = policy_net(x_n, h_n, c_n)
-        a_index = np.random.choice(range(len(dist[0])), p=dist[0].data.numpy())
+        flat_dist = np.array(dist[0].data.tolist())
+        flat_dist /= sum(flat_dist)
+        a_index = np.random.choice(range(3), p=flat_dist)
 
         # Calculate grad_W(log(p)), for all parameters W
         log_p = dist[0][a_index].log()
@@ -183,7 +173,6 @@ def run_policy_network(policy_net, state):
         # Prepare inputs for next iteration/agent
         h_n = Variable(h_nn.data)
         c_n = Variable(c_nn.data)
-        if cuda: h_n, c_n = h_n.cuda(), c_n.cuda()
         a_n = np.zeros(3)
         a_n[a_index] = 1
 
@@ -207,10 +196,7 @@ def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
        baseline is our MLP value network
     '''
     # Accumulate the update terms for each step in the episode into w_step
-    if cuda:
-        W_step = [torch.zeros(W.size()).cuda() for W in policy_net.parameters()]
-    else:
-        W_step = [torch.zeros(W.size()) for W in policy_net.parameters()]
+    W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
     for t, data in enumerate(episode):
         s_t, G_t, grad_W = data[0][0], data[2], data[0][2]
         for i in range(len(W_step)):
