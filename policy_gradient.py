@@ -3,10 +3,10 @@
     on the two-agent Gridworld Cliff environment.
 '''
 
-import gridworld
 import numpy as np
 import random
 import torch
+import sys
 
 from namedlist import namedlist
 from torch.autograd import Variable
@@ -34,16 +34,17 @@ def run_episode(policy_net, gamma=1):
     EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
 
     # Initialize state as player position
-    state = gridworld.start
+    state = game.start
     episode = []
 
+    # TODO: interface for game.goal
     # Run Gridworld until episode terminates at the goal
-    while not np.array_equal(state, gridworld.goal):
+    while not np.array_equal(state, game.goal):
         # Let our agent decide that to do at this state
         action, grad_W = run_policy_network(policy_net, state)
 
         # Take that action, then environment gives us the next state and reward
-        next_s, reward = gridworld.perform_action(state, action)
+        next_s, reward = game.perform_action(state, action)
 
         # Record state, action, grad_W, reward
         episode.append(EpisodeStep(s=state, a=action, grad_W=grad_W, r=reward))
@@ -135,10 +136,10 @@ def run_policy_network(policy_net, state):
 
        Essentially, we run the policy_net LSTM for game.num_agents time-steps,
        in order to get the action for each agent, conditioned on the actions of
-       the previous agents. As such, the input of the LSTM at time-step n is 
+       the previous agents. As such, the input of the LSTM at time-step n is
        concat(a_{n-1}, state).
 
-       For each parameter W, the gradient term `sum(grad_W(log(p)))` is also 
+       For each parameter W, the gradient term `sum(grad_W(log(p)))` is also
        computed and returned. This is used in the REINFORCE algorithm; see
        train_policy_network().
     '''
@@ -151,7 +152,7 @@ def run_policy_network(policy_net, state):
     grad_W = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
     # Use policy_net to predict output for each agent
-    for n in range(gridworld.num_agents):
+    for n in range(game.num_agents):
         # TODO(Martin): Why is renormalizing flat_dist necessary on CUDA?
         # Predict action for the agent
         x_n = Variable(FloatTensor(np.append(a_n, state).reshape(1, 5)))
@@ -209,16 +210,22 @@ def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
     for i, W in enumerate(policy_net.parameters()):
         W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
 
-policy_net = build_policy_network()
-value_net = build_value_network()
-baseline = lambda state: run_value_network(value_net, state)
+if __name__ == '__main__':
+    if len(sys.argv) == 2 and sys.argv[1] == 'gridworld':
+        import gridworld as game
+    else:
+        sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 
-cum_value_error = 0.0
-cum_return = 0.0
-for num_episode in range(50000):
-    episode = run_episode(policy_net, gamma=1)
-    value_error = train_value_network(value_net, episode)
-    cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
-    cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-    print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error)) # Print episode return
-    train_policy_network(policy_net, episode, baseline=baseline)
+    policy_net = build_policy_network()
+    value_net = build_value_network()
+    baseline = lambda state: run_value_network(value_net, state)
+
+    cum_value_error = 0.0
+    cum_return = 0.0
+    for num_episode in range(50000):
+        episode = run_episode(policy_net, gamma=1)
+        value_error = train_value_network(value_net, episode)
+        cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
+        cum_return = 0.9 * cum_return + 0.1 * episode[0].G
+        print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error)) # Print episode return
+        train_policy_network(policy_net, episode, baseline=baseline)
