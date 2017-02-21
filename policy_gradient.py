@@ -209,16 +209,28 @@ def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
     for i, W in enumerate(policy_net.parameters()):
         W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
 
-policy_net = build_policy_network()
-value_net = build_value_network()
-baseline = lambda state: run_value_network(value_net, state)
+for i in range(1000):
+    policy_net = build_policy_network()
+    value_net = build_value_network()
+    baseline = lambda state: run_value_network(value_net, state)
 
-cum_value_error = 0.0
-cum_return = 0.0
-for num_episode in range(50000):
-    episode = run_episode(policy_net, gamma=1)
-    value_error = train_value_network(value_net, episode)
-    cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
-    cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-    print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error)) # Print episode return
-    train_policy_network(policy_net, episode, baseline=baseline)
+    cum_value_error = 0.0
+    cum_return = 0.0
+    for num_episode in range(10000):
+        episode = run_episode(policy_net, gamma=1)
+        value_error = train_value_network(value_net, episode)
+        cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
+        cum_return = 0.9 * cum_return + 0.1 * episode[0].G
+        # print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error)) # Print episode return
+        train_policy_network(policy_net, episode, baseline=baseline)
+
+        if num_episode % 100 == 0: print('EPISODE {} RETURN {}'.format(num_episode, cum_return))
+        if cum_return == -101.0: print('DID NOT LEARN.')
+
+        if cum_return > -5.0:
+            print('Iteration {}, Episode {}, cum_return {}, cum_value_error {}'.format(i, num_episode, cum_return, cum_value_error))
+            break
+
+    if num_episode == 9999: 
+        print('DID NOT LEARN.')
+
