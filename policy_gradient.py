@@ -148,7 +148,8 @@ def run_policy_network(policy_net, state):
     a_n = np.zeros(3)
     h_n, c_n = Variable(ZeroTensor(1, 32)), Variable(ZeroTensor(1, 32))
     action = []
-    grad_W = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+    # grad_W = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+    policy_net.zero_grad()
 
     # Use policy_net to predict output for each agent
     for n in range(gridworld.num_agents):
@@ -162,19 +163,21 @@ def run_policy_network(policy_net, state):
 
         # Calculate grad_W(log(p)), for all parameters W
         log_p = dist[0][a_index].log()
-        policy_net.zero_grad()
+        # policy_net.zero_grad()
         log_p.backward()
-        grad_log_p = [W.grad.data for W in policy_net.parameters()]
+        # grad_log_p = [W.grad.data for W in policy_net.parameters()]
 
         # Track output of this iteration/agent
         action.append(actions[a_index])
-        for i in range(len(grad_W)): grad_W[i] += grad_log_p[i]
+        # for i in range(len(grad_W)): grad_W[i] += grad_log_p[i]
 
         # Prepare inputs for next iteration/agent
         h_n = Variable(h_nn.data)
         c_n = Variable(c_nn.data)
         a_n = np.zeros(3)
         a_n[a_index] = 1
+
+    grad_W = [W.grad.data for W in policy_net.parameters()]
 
     return np.array(action), grad_W
 
