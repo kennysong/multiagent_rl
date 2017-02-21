@@ -21,14 +21,14 @@
 
 import numpy as np
 
+num_agents = 2
+
 grid_y, grid_x = 4, 4 # It was taking ages
 state_space = [np.array((i, j)) for i in range(grid_y) for j in range(grid_x)]
 action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
 
 start, goal = np.array((0, 0)), np.array((0, grid_x-1))
 cliff_states = [np.array((0, x)) for x in range(1, grid_x-1)]
-
-num_agents = 2
 
 def P(s, s_next, a):
     '''The transition probabilities. Returns:
@@ -75,6 +75,20 @@ def perform_action(s, a):
     reward = R(s, a)
 
     return (s_next, reward)
+
+def start_state():
+    '''Returns the start state of the game.'''
+    return start
+
+def is_end(s):
+    '''Given a state, return if the game should end.'''
+    return np.array_equal(s, goal)
+
+def set_options(options):
+    '''Set some game options, if given.'''
+    global grid_x, grid_y
+    grid_x = options.get('grid_x', grid_x)
+    grid_y = options.get('grid_y', grid_y)
 
 def included(a, L):
     '''Returns if the np.array a is in a list of np.array's L.'''

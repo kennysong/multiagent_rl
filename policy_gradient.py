@@ -1,6 +1,13 @@
 '''
     This is a policy gradient implementation (REINFORCE with v(s) baseline)
     on the two-agent Gridworld Cliff environment.
+
+    Games should conform to the interface:
+      game.num_agents - number of agents
+      game.start_state() - returns start state of the game
+      game.is_end(state) - given a state, return if the game/episode has ended
+      game.perform_action(s, a) - perform an action at state s, returns next_s, reward
+      game.set_options(options) - set options for the game
 '''
 
 import numpy as np
@@ -34,12 +41,11 @@ def run_episode(policy_net, gamma=1):
     EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
 
     # Initialize state as player position
-    state = game.start
+    state = game.start_state()
     episode = []
 
-    # TODO: interface for game.goal
-    # Run Gridworld until episode terminates at the goal
-    while not np.array_equal(state, game.goal):
+    # Run game until agent reaches the end
+    while not game.is_end(state):
         # Let our agent decide that to do at this state
         action, grad_W = run_policy_network(policy_net, state)
 
@@ -161,6 +167,8 @@ def run_policy_network(policy_net, state):
         flat_dist /= sum(flat_dist)
         a_index = np.random.choice(range(3), p=flat_dist)
 
+        # TODO: If we don't zero_grad() between calls, it may just add the
+        # gradients together automatically!
         # Calculate grad_W(log(p)), for all parameters W
         log_p = dist[0][a_index].log()
         log_p.backward()  # This will accumulate the gradient over all iterations
