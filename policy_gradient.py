@@ -135,20 +135,20 @@ def run_policy_network(policy_net, state):
 
        Essentially, we run the policy_net LSTM for game.num_agents time-steps,
        in order to get the action for each agent, conditioned on the actions of
-       the previous agents. As such, the input of the LSTM at time-step n is 
+       the previous agents. As such, the input of the LSTM at time-step n is
        concat(a_{n-1}, state).
 
-       For each parameter W, the gradient term `sum(grad_W(log(p)))` is also 
+       For each parameter W, the gradient term `sum(grad_W(log(p)))` is also
        computed and returned. This is used in the REINFORCE algorithm; see
        train_policy_network().
     '''
     # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
     actions = [-1, 0, 1]
+    action = []
     a_n = np.zeros(3)
     h_n, c_n = Variable(ZeroTensor(1, 32)), Variable(ZeroTensor(1, 32))
-    action = []
-    grad_W = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+    policy_net.zero_grad()
 
     # Use policy_net to predict output for each agent
     for n in range(gridworld.num_agents):
@@ -162,19 +162,19 @@ def run_policy_network(policy_net, state):
 
         # Calculate grad_W(log(p)), for all parameters W
         log_p = dist[0][a_index].log()
-        policy_net.zero_grad()
-        log_p.backward()
-        grad_log_p = [W.grad.data for W in policy_net.parameters()]
+        log_p.backward()  # This will accumulate the gradient over all iterations
 
         # Track output of this iteration/agent
         action.append(actions[a_index])
-        for i in range(len(grad_W)): grad_W[i] += grad_log_p[i]
 
         # Prepare inputs for next iteration/agent
         h_n = Variable(h_nn.data)
         c_n = Variable(c_nn.data)
         a_n = np.zeros(3)
         a_n[a_index] = 1
+
+    # Get the gradients; clone() is needed as the parameter Tensors are reused
+    grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
 
     return np.array(action), grad_W
 
@@ -215,7 +215,7 @@ baseline = lambda state: run_value_network(value_net, state)
 
 cum_value_error = 0.0
 cum_return = 0.0
-for num_episode in range(50000):
+for num_episode in range(10000):
     episode = run_episode(policy_net, gamma=1)
     value_error = train_value_network(value_net, episode)
     cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
