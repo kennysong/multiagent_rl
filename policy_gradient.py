@@ -47,18 +47,17 @@ def run_episode(policy_net, gamma=1):
     # Run game until agent reaches the end
     while not game.is_end(state):
         # Let our agent decide that to do at this state
-        action, grad_W = run_policy_net(policy_net, state)
+        a_indices, grad_W = run_policy_net(policy_net, state)
 
         # Take that action, then the game gives us the next state and reward
-        next_s, reward = game.perform_action(state, action)
+        next_s, r = game.perform_action(state, a_indices)
 
         # Record state, action, grad_W, reward
-        episode.append(EpisodeStep(s=state, a=action, grad_W=grad_W, r=reward))
+        episode.append(EpisodeStep(s=state, a=a_indices, grad_W=grad_W, r=r))
         state = next_s
 
         # This is taking ages
-        if len(episode) > 100:
-            break
+        if len(episode) > 100: break
 
     # We have the reward from each (state, action), now calculate the return
     T = len(episode)
@@ -124,6 +123,7 @@ def build_policy_net(layers):
             self.lstm = torch.nn.LSTMCell(layers[0], layers[1])
             self.linear = torch.nn.Linear(layers[1], layers[2])
             self.softmax = torch.nn.Softmax()
+            self.layers = layers
 
         def forward(self, x, h0, c0):
             h1, c1 = self.lstm(x, (h0, c0))
@@ -148,20 +148,21 @@ def run_policy_net(policy_net, state):
     '''
     # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
+    h_size, a_size = policy_net.layers[1], policy_net.layers[2]
     a_indices = []
-    a_n = np.zeros(3)
-    h_n, c_n = Variable(ZeroTensor(1, 32)), Variable(ZeroTensor(1, 32))
+    a_n = np.zeros(a_size)
+    h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     policy_net.zero_grad()
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # TODO(Martin): Why is renormalizing flat_dist necessary on CUDA?
         # Predict action for the agent
-        x_n = Variable(FloatTensor(np.append(a_n, state).reshape(1, 5)))
+        x_n = Variable(FloatTensor([np.append(a_n, state)]))
         dist, h_nn, c_nn = policy_net(x_n, h_n, c_n)
         flat_dist = np.array(dist[0].data.tolist())
         flat_dist /= sum(flat_dist)
-        a_index = np.random.choice(range(3), p=flat_dist)
+        a_index = np.random.choice(range(a_size), p=flat_dist)
 
         # Calculate grad_W(log(p)), for all parameters W
         log_p = dist[0][a_index].log()
@@ -172,7 +173,7 @@ def run_policy_net(policy_net, state):
 
         # Prepare inputs for next iteration/agent
         h_n, c_n = Variable(h_nn.data), Variable(c_n.data)
-        a_n = np.zeros(3)
+        a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
     # Get the gradients; clone() is needed as the parameter Tensors are reused
@@ -216,6 +217,10 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
+    elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
+        import hunters as game
+        policy_net_layers = [9+8, 64, 9]
+        value_net_layers = [8, 32, 1]
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 

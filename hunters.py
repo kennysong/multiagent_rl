@@ -23,8 +23,9 @@ import numpy as np
 n = 6  # grid size
 k = 2  # hunters
 m = 2  # rabbits
+num_agents = k
 
-def initial_state():
+def start_state():
     '''Returns a random initial state. The state vector is a flat array of:
         concat(hunter positions, rabbit positions).'''
     return np.random.randint(0, n, size=2*k+2*m)
@@ -37,9 +38,9 @@ def valid_action(a):
     '''Returns if the given action vector is valid'''
     return a.shape == (2*k, ) and np.all([-1 <= e <= 1 for e in a])
 
-def perform_action(s, a, rabbit_action=None, remove_hunter=False,
+def perform_action(s, a_indices, rabbit_action=None, remove_hunter=False,
                    capture_reward=False):
-    '''Performs action a in state s.
+    '''Performs an action given by a_indices in state s.
 
        Parameters:
        s is the state vector
@@ -52,8 +53,9 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False,
        capture_reward will give a reward of +1 if a rabbit is captured
 
        Returns:
-       (s_next, reward, is_end)'''
+       (s_next, reward)'''
     # Validate inputs
+    a = action_indices_to_coordinates(a_indices)
     assert valid_state(s)
     assert valid_action(a)
 
@@ -92,10 +94,9 @@ def perform_action(s, a, rabbit_action=None, remove_hunter=False,
                 if capture_reward: reward += 1
                 if remove_hunter: hunter_pos[i:i+2] = [-1, -1]
 
-    # Return (s_next, reward, is_end)
+    # Return (s_next, reward)
     s_next = np.concatenate((hunter_pos, rabbit_pos))
-    is_end = (rabbit_pos == -1).all()
-    return s_next, reward, is_end
+    return s_next, reward
 
 def opposite_direction(s, a, i):
     '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid
@@ -120,6 +121,11 @@ def opposite_direction(s, a, i):
     # Calculate opposite direction
     return np.sign(rabbit - closest_hunter)
 
+def is_end(s):
+    '''Given a state, return if the game should end.'''
+    rabbit_pos = s[2*k:]
+    return (rabbit_pos == -1).all()
+
 ## Functions to convert action representations ##
 
 action_index_to_coords = [
@@ -132,6 +138,11 @@ def action_index_to_coordinates(index):
     '''Converts an action index 0 to 8 to an agent's action coordinates.'''
     assert 0 <= index <= 8
     return action_index_to_coords[index]
+
+def action_indices_to_coordinates(a_indices):
+    '''Converts a list of action indices to action coordinates.'''
+    coords = [action_index_to_coordinates(i) for i in a_indices]
+    return np.concatenate(coords)
 
 def action_coordinates_to_index(coords):
     '''Converts an agent's action coordinates to an index 0 to 8.'''
