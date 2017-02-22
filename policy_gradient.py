@@ -6,7 +6,7 @@
       game.num_agents - number of agents
       game.start_state() - returns start state of the game
       game.is_end(state) - given a state, return if the game/episode has ended
-      game.perform_action(s, a) - perform an action at state s, returns next_s, reward
+      game.perform_action(s, a) - given action indices at state s, returns next_s, reward
       game.set_options(options) - set options for the game
 '''
 
@@ -35,7 +35,7 @@ def run_episode(policy_net, gamma=1):
     '''
     # Define a EpisodeStep container for each step in the episode:
     #   s, a is the state-action pair visited during that step
-    #   grad_W is gradient term sum(grad_W(log(p))); see train_policy_network()
+    #   grad_W is gradient term sum(grad_W(log(p))); see train_policy_net()
     #   r is the reward received from that state-action pair
     #   G is the discounted return received from that state-action pair
     EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
@@ -47,9 +47,9 @@ def run_episode(policy_net, gamma=1):
     # Run game until agent reaches the end
     while not game.is_end(state):
         # Let our agent decide that to do at this state
-        action, grad_W = run_policy_network(policy_net, state)
+        action, grad_W = run_policy_net(policy_net, state)
 
-        # Take that action, then environment gives us the next state and reward
+        # Take that action, then the game gives us the next state and reward
         next_s, reward = game.perform_action(state, action)
 
         # Record state, action, grad_W, reward
@@ -67,18 +67,17 @@ def run_episode(policy_net, gamma=1):
 
     return episode
 
-def build_value_network():
+def build_value_net(layers):
     '''Builds an MLP value function approximator, which maps states to scalar
        values. It has one hidden layer with 32 units and tanh activations.
     '''
-    layers = [2, 32, 1]
     value_net = torch.nn.Sequential(
                   torch.nn.Linear(layers[0], layers[1]),
                   torch.nn.Tanh(),
                   torch.nn.Linear(layers[1], layers[2]))
     return value_net.cuda() if cuda else value_net
 
-def train_value_network(value_net, episode):
+def train_value_net(value_net, episode):
     '''Trains an MLP value function approximator based on the output of one
        episode. The value network will map states to scalar values.
 
@@ -98,20 +97,19 @@ def train_value_network(value_net, episode):
 
     # Train the value network on states, returns
     optimizer.zero_grad()
-    pred_returns = value_net(states)
-    loss = loss_fn(pred_returns, returns)
+    loss = loss_fn(value_net(states), returns)
     loss.backward()
     optimizer.step()
 
     return loss.data[0]
 
-def run_value_network(value_net, state):
+def run_value_net(value_net, state):
     '''Wrapper function to feed one state into the given value network and
        return the value as a scalar.'''
     result = value_net(Variable(FloatTensor([state])))
     return result.data[0][0]
 
-def build_policy_network():
+def build_policy_net(layers):
     '''Builds an LSTM policy network, which maps states to action vectors.
 
        More precisely, the input into the LSTM will be a 5-D vector consisting
@@ -132,27 +130,25 @@ def build_policy_network():
             o1 = self.softmax(self.linear(h1))
             return o1, h1, c1
 
-    layers = [5, 32, 3]
     policy_net = PolicyNet(layers)
     return policy_net.cuda() if cuda else policy_net
 
-def run_policy_network(policy_net, state):
+def run_policy_net(policy_net, state):
     '''Wrapper function to feed a given state into the given policy network and
        return an action vector, as well as parameter gradients.
 
-       Essentially, we run the policy_net LSTM for game.num_agents time-steps,
-       in order to get the action for each agent, conditioned on the actions of
-       the previous agents. As such, the input of the LSTM at time-step n is
-       concat(a_{n-1}, state).
+       Essentially, run the policy_net LSTM for game.num_agents time-steps, to
+       get the action for each agent, conditioned on previous agents' actions.
+       As such, the input to the LSTM at time-step n is concat(a_{n-1}, state).
+       We return a list of action indices, one index per agent.
 
        For each parameter W, the gradient term `sum(grad_W(log(p)))` is also
        computed and returned. This is used in the REINFORCE algorithm; see
-       train_policy_network().
+       train_policy_net().
     '''
     # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
-    actions = [-1, 0, 1]
-    action = []
+    a_indices = []
     a_n = np.zeros(3)
     h_n, c_n = Variable(ZeroTensor(1, 32)), Variable(ZeroTensor(1, 32))
     policy_net.zero_grad()
@@ -167,27 +163,24 @@ def run_policy_network(policy_net, state):
         flat_dist /= sum(flat_dist)
         a_index = np.random.choice(range(3), p=flat_dist)
 
-        # TODO: If we don't zero_grad() between calls, it may just add the
-        # gradients together automatically!
         # Calculate grad_W(log(p)), for all parameters W
         log_p = dist[0][a_index].log()
         log_p.backward()  # This will accumulate the gradient over all iterations
 
-        # Track output of this iteration/agent
-        action.append(actions[a_index])
+        # Record action for this iteration/agent
+        a_indices.append(a_index)
 
         # Prepare inputs for next iteration/agent
-        h_n = Variable(h_nn.data)
-        c_n = Variable(c_nn.data)
+        h_n, c_n = Variable(h_nn.data), Variable(c_n.data)
         a_n = np.zeros(3)
         a_n[a_index] = 1
 
     # Get the gradients; clone() is needed as the parameter Tensors are reused
     grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
 
-    return np.array(action), grad_W
+    return a_indices, grad_W
 
-def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
+def train_policy_net(policy_net, episode, baseline=None, lr=3*1e-3):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, for each time-step t in the
@@ -221,19 +214,20 @@ def train_policy_network(policy_net, episode, baseline=None, lr=3*1e-3):
 if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == 'gridworld':
         import gridworld as game
+        policy_net_layers = [5, 32, 3]
+        value_net_layers = [2, 32, 1]
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 
-    policy_net = build_policy_network()
-    value_net = build_value_network()
-    baseline = lambda state: run_value_network(value_net, state)
+    policy_net = build_policy_net(policy_net_layers)
+    value_net = build_value_net(value_net_layers)
+    baseline = lambda state: run_value_net(value_net, state)
 
-    cum_value_error = 0.0
-    cum_return = 0.0
+    cum_value_error, cum_return = 0.0, 0.0
     for num_episode in range(50000):
-        episode = run_episode(policy_net, gamma=1)
-        value_error = train_value_network(value_net, episode)
+        episode = run_episode(policy_net)
+        value_error = train_value_net(value_net, episode)
         cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
         cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-        print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error)) # Print episode return
-        train_policy_network(policy_net, episode, baseline=baseline)
+        print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error))
+        train_policy_net(policy_net, episode, baseline=baseline)

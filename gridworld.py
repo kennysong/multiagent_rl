@@ -22,7 +22,6 @@
 import numpy as np
 
 num_agents = 2
-
 grid_y, grid_x = 4, 4 # It was taking ages
 state_space = [np.array((i, j)) for i in range(grid_y) for j in range(grid_x)]
 action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
@@ -59,16 +58,17 @@ def R(s, a):
     # Otherwise, return a default -1 reward per time step
     return -1
 
-def perform_action(s, a):
-    '''Performs action a in state s. Returns:
+def perform_action(s, a_indices):
+    '''Performs an action given by a_indices in state s. Returns:
        (s_next, reward)'''
     # Do some input validation
+    a = a_indices_to_coordinates(a_indices)
     assert included(s, state_space)
     assert included(a, action_space)
 
     # Sample the next state based on the transition probabilities from P
     transition_probs = [P(s, s_next, a) for s_next in state_space]
-    index = np.random.choice(range(len(transition_probs)), p=transition_probs)
+    index = np.random.choice(range(len(state_space)), p=transition_probs)
     s_next = state_space[index]
 
     # Calculate the reward we recieved
@@ -83,6 +83,11 @@ def start_state():
 def is_end(s):
     '''Given a state, return if the game should end.'''
     return np.array_equal(s, goal)
+
+def a_indices_to_coordinates(a_indices):
+    '''Converts a list of action indices to action coordinates.'''
+    coords = [i-1 for i in a_indices]
+    return coords
 
 def set_options(options):
     '''Set some game options, if given.'''

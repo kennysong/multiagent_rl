@@ -3,6 +3,8 @@
     printing out the game state. You may want to decrease gridworld.grid_cols
     so the random agent can find the goal in a reasonable time.
 '''
+# TODO: Make this, and all other tests, conform to the policy_gradient game 
+# interface
 
 # Add parent directory to PYTHONPATH
 # (http://stackoverflow.com/questions/714063/importing-modules-from-parent-folder)
