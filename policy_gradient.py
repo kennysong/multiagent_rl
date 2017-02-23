@@ -57,7 +57,9 @@ def run_episode(policy_net, gamma=1):
         state = next_s
 
         # This is taking ages
-        if len(episode) > 100: break
+        if len(episode) > 100:
+            episode[-1].r -= 100
+            break
 
     # We have the reward from each (state, action), now calculate the return
     T = len(episode)
@@ -219,9 +221,9 @@ if __name__ == '__main__':
         value_net_layers = [2, 32, 1]
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
-        policy_net_layers = [9+8, 64, 9]
+        policy_net_layers = [17, 64, 9]
         value_net_layers = [8, 32, 1]
-        game.set_options({'rabbit_action': None, 'remove_hunters': False, 
+        game.set_options({'rabbit_action': None, 'remove_hunters': False,
                           'capture_reward': 5})
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
