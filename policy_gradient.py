@@ -221,6 +221,8 @@ if __name__ == '__main__':
         import hunters as game
         policy_net_layers = [9+8, 64, 9]
         value_net_layers = [8, 32, 1]
+        game.set_options({'rabbit_action': None, 'remove_hunters': False, 
+                          'capture_reward': 5})
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 

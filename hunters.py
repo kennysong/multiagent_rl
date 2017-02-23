@@ -25,6 +25,15 @@ k = 2  # hunters
 m = 2  # rabbits
 num_agents = k
 
+# None: rabbits do not move
+# 'random': rabbits move one block randomly
+# 'opposite': rabbits move opposite to the closest hunter
+rabbit_action = None
+# remove_hunter will remove the first hunter that captures a rabbit
+remove_hunter = False
+# capture_reward is the extra reward if a rabbit is captured
+capture_reward = 0
+
 def start_state():
     '''Returns a random initial state. The state vector is a flat array of:
         concat(hunter positions, rabbit positions).'''
@@ -38,21 +47,8 @@ def valid_action(a):
     '''Returns if the given action vector is valid'''
     return a.shape == (2*k, ) and np.all([-1 <= e <= 1 for e in a])
 
-def perform_action(s, a_indices, rabbit_action=None, remove_hunter=False,
-                   capture_reward=False):
-    '''Performs an action given by a_indices in state s.
-
-       Parameters:
-       s is the state vector
-       a is the action vector
-       rabbit_action is either
-         None: rabbits do not move
-         'random': rabbits move one block randomly
-         'opposite': rabbits move opposite to the closest hunter
-       remove_hunter will remove the first hunter that captures a rabbit
-       capture_reward will give a reward of +1 if a rabbit is captured
-
-       Returns:
+def perform_action(s, a_indices):
+    '''Performs an action given by a_indices in state s. Returns:
        (s_next, reward)'''
     # Validate inputs
     a = action_indices_to_coordinates(a_indices)
@@ -90,8 +86,9 @@ def perform_action(s, a_indices, rabbit_action=None, remove_hunter=False,
         for j in range(0, len(rabbit_pos), 2):
             rabbit = rabbit_pos[j:j+2]
             if np.array_equal(hunter, rabbit) and hunter[0] != -1:
+                # A rabbit has been captured
                 rabbit_pos[j:j+2] = [-1, -1]
-                if capture_reward: reward += 1
+                reward += capture_reward
                 if remove_hunter: hunter_pos[i:i+2] = [-1, -1]
 
     # Return (s_next, reward)
@@ -125,6 +122,13 @@ def is_end(s):
     '''Given a state, return if the game should end.'''
     rabbit_pos = s[2*k:]
     return (rabbit_pos == -1).all()
+
+def set_options(options):
+    '''Set some game options, if given.'''
+    global rabbit_action, remove_hunter, capture_reward
+    rabbit_action = options.get('rabbit_action', rabbit_action)
+    remove_hunter = options.get('remove_hunter', remove_hunter)
+    capture_reward = options.get('capture_reward', capture_reward)
 
 ## Functions to convert action representations ##
 
