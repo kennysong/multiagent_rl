@@ -183,7 +183,7 @@ def run_policy_net(policy_net, state):
 
     return a_indices, grad_W
 
-def train_policy_net(policy_net, episode, baseline=None, lr=3*1e-3):
+def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, for each time-step t in the
@@ -199,6 +199,7 @@ def train_policy_net(policy_net, episode, baseline=None, lr=3*1e-3):
        model is our LSTM policy network
        episode is an list of EpisodeStep's
        baseline is our MLP value network
+       td is whether we use the TD parameter update
     '''
     # Accumulate the update terms for each step in the episode into w_step
     W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
@@ -207,6 +208,11 @@ def train_policy_net(policy_net, episode, baseline=None, lr=3*1e-3):
         for i in range(len(W_step)):
             if baseline:
                 W_step[i] += grad_W[i] * (G_t - baseline(s_t))
+            elif baseline and td:
+                # TODO: This does not seem to work!
+                if t == len(episode)-1: continue
+                s_tt = episode[t+1].s
+                W_step[i] += grad_W[i] * (r_t + baseline(s_tt) - baseline(s_t))
             else:
                 W_step[i] += grad_W[i] * G_t
 
