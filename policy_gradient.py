@@ -203,13 +203,12 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
     '''
     # Accumulate the update terms for each step in the episode into w_step
     W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
-    for step in episode:
-        s_t, G_t, grad_W = step.s, step.G, step.grad_W
+    for t, step in enumerate(episode):
+        s_t, G_t, r_t, grad_W = step.s, step.G, step.r, step.grad_W
         for i in range(len(W_step)):
-            if baseline:
+            if baseline and not td:
                 W_step[i] += grad_W[i] * (G_t - baseline(s_t))
             elif baseline and td:
-                # TODO: This does not seem to work!
                 if t == len(episode)-1: continue
                 s_tt = episode[t+1].s
                 W_step[i] += grad_W[i] * (r_t + baseline(s_tt) - baseline(s_t))
@@ -245,4 +244,4 @@ if __name__ == '__main__':
         cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
         cum_return = 0.9 * cum_return + 0.1 * episode[0].G
         print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error))
-        train_policy_net(policy_net, episode, baseline=baseline)
+        train_policy_net(policy_net, episode, baseline=baseline, td=True)
