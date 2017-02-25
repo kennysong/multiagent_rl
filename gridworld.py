@@ -22,7 +22,7 @@
 import numpy as np
 
 num_agents = 2
-grid_y, grid_x = 4, 4
+grid_y, grid_x = 4, 12
 start, goal = np.array((0, 0)), np.array((0, grid_x-1))
 
 state_space = [np.array((i, j)) for i in range(grid_y) for j in range(grid_x)]

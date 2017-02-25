@@ -57,8 +57,8 @@ def run_episode(policy_net, gamma=1):
         state = next_s
 
         # This is taking ages
-        if len(episode) > 100:
-            episode[-1].r -= 100
+        if len(episode) > 1000:
+            episode[-1].r -= 1000
             break
 
     # We have the reward from each (state, action), now calculate the return
@@ -230,7 +230,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_x': 4, 'grid_y': 4})
+        game.set_options({'grid_y': 4, 'grid_x': 12})
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
         policy_net_layers = [17, 64, 9]
@@ -240,25 +240,33 @@ if __name__ == '__main__':
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 
-    policy_net = build_policy_net(policy_net_layers)
-    value_net = build_value_net(value_net_layers)
-    baseline = lambda state: run_value_net(value_net, state)
+    for i in range(1000):
+        policy_net = build_policy_net(policy_net_layers)
+        value_net = build_value_net(value_net_layers)
+        baseline = lambda state: run_value_net(value_net, state)
 
-    # Init main Tensors first, so we don't have to allocate memory at runtime
-    # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
-    #   Used in run_policy_net():
-    h_size, a_size = policy_net_layers[1], policy_net_layers[2]
-    h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
-    x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
-    sum_log_p = Variable(ZeroTensor(1))
-    #   Used in train_policy_net():
-    W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+        # Init main Tensors first, so we don't have to allocate memory at runtime
+        # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
+        #   Used in run_policy_net():
+        h_size, a_size = policy_net_layers[1], policy_net_layers[2]
+        h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
+        x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
+        sum_log_p = Variable(ZeroTensor(1))
+        #   Used in train_policy_net():
+        W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
-    cum_value_error, cum_return = 0.0, 0.0
-    for num_episode in range(50000):
-        episode = run_episode(policy_net)
-        value_error = train_value_net(value_net, episode)
-        cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
-        cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-        print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error))
-        train_policy_net(policy_net, episode, baseline=baseline)
+        cum_value_error, cum_return = 0.0, 0.0
+        for num_episode in range(10000):
+            episode = run_episode(policy_net)
+            value_error = train_value_net(value_net, episode)
+            cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
+            cum_return = 0.9 * cum_return + 0.1 * episode[0].G
+            print("i: {} Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(i, num_episode, len(episode), cum_return, cum_value_error))
+            train_policy_net(policy_net, episode, baseline=baseline)
+
+            if cum_return > -9:
+                print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
+                break
+
+        if num_episode == 9999:
+            print("DID NOT LEARN. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
