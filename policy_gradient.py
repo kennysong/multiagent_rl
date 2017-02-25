@@ -57,8 +57,8 @@ def run_episode(policy_net, gamma=1):
         state = next_s
 
         # This is taking ages
-        if len(episode) > 100:
-            episode[-1].r -= 100
+        if len(episode) > 1000:
+            episode[-1].r -= 1000
             break
 
     # We have the reward from each (state, action), now calculate the return
@@ -233,15 +233,23 @@ if __name__ == '__main__':
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 
-    policy_net = build_policy_net(policy_net_layers)
-    value_net = build_value_net(value_net_layers)
-    baseline = lambda state: run_value_net(value_net, state)
+    for i in range(1000):
+        policy_net = build_policy_net(policy_net_layers)
+        value_net = build_value_net(value_net_layers)
+        baseline = lambda state: run_value_net(value_net, state)
 
-    cum_value_error, cum_return = 0.0, 0.0
-    for num_episode in range(50000):
-        episode = run_episode(policy_net)
-        value_error = train_value_net(value_net, episode)
-        cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
-        cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-        print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error))
-        train_policy_net(policy_net, episode, baseline=baseline, td=True)
+        cum_value_error, cum_return = 0.0, 0.0
+        for num_episode in range(10000):
+            episode = run_episode(policy_net)
+            value_error = train_value_net(value_net, episode)
+            cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
+            cum_return = 0.9 * cum_return + 0.1 * episode[0].G
+            print("i: {} Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(i, num_episode, len(episode), cum_return, cum_value_error))
+            train_policy_net(policy_net, episode, baseline=baseline)
+
+            if cum_return > -9:
+                print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
+                break
+
+        if num_episode == 9999:
+            print("DID NOT LEARN. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))

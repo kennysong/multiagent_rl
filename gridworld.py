@@ -22,7 +22,7 @@
 import numpy as np
 
 num_agents = 2
-grid_y, grid_x = 4, 4 # It was taking ages
+grid_y, grid_x = 8, 8 # It was taking ages
 state_space = [np.array((i, j)) for i in range(grid_y) for j in range(grid_x)]
 action_space = [np.array((i, j)) for i in (-1, 0, 1) for j in (-1, 0, 1)]
 
