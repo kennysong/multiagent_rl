@@ -144,7 +144,7 @@ def run_policy_net(policy_net, state):
        As such, the input to the LSTM at time-step n is concat(a_{n-1}, state).
        We return a list of action indices, one index per agent.
 
-       For each parameter W, the gradient term `sum(grad_W(log(p)))` is also
+       For each parameter W, the gradient term `grad_W(sum(log(p)))` is also
        computed and returned. This is used in the REINFORCE algorithm; see
        train_policy_net().
     '''
@@ -153,8 +153,10 @@ def run_policy_net(policy_net, state):
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
     a_indices = []
     a_n = np.zeros(a_size)
-    h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
+    global h_n, c_n
+    h_n.data.zero_(); c_n.data.zero_()
     policy_net.zero_grad()
+    sum_log_p = Variable(ZeroTensor(1))
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
@@ -166,9 +168,9 @@ def run_policy_net(policy_net, state):
         flat_dist /= sum(flat_dist)
         a_index = np.random.choice(range(a_size), p=flat_dist)
 
-        # Calculate grad_W(log(p)), for all parameters W
+        # Calculate sum(log(p))
         log_p = dist[0][a_index].log()
-        log_p.backward()  # This will accumulate the gradient over all iterations
+        sum_log_p += log_p
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
@@ -179,6 +181,7 @@ def run_policy_net(policy_net, state):
         a_n[a_index] = 1
 
     # Get the gradients; clone() is needed as the parameter Tensors are reused
+    sum_log_p.backward()
     grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
 
     return a_indices, grad_W
@@ -202,7 +205,7 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
        td is whether we use the TD parameter update
     '''
     # Accumulate the update terms for each step in the episode into w_step
-    W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+    for W in W_step: W.zero_()
     for t, step in enumerate(episode):
         s_t, G_t, r_t, grad_W = step.s, step.G, step.r, step.grad_W
         for i in range(len(W_step)):
@@ -237,6 +240,15 @@ if __name__ == '__main__':
     value_net = build_value_net(value_net_layers)
     baseline = lambda state: run_value_net(value_net, state)
 
+    # Init main Tensors first, so we don't have to allocate memory at runtime
+    # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
+    #   Used in run_policy_net():
+    h_size, a_size = policy_net_layers[1], policy_net_layers[2]
+    h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
+    x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
+    #   Used in train_policy_net():
+    W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+
     cum_value_error, cum_return = 0.0, 0.0
     for num_episode in range(50000):
         episode = run_episode(policy_net)
@@ -244,4 +256,4 @@ if __name__ == '__main__':
         cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
         cum_return = 0.9 * cum_return + 0.1 * episode[0].G
         print("Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(num_episode, len(episode), cum_return, cum_value_error))
-        train_policy_net(policy_net, episode, baseline=baseline, td=True)
+        train_policy_net(policy_net, episode, baseline=baseline)
