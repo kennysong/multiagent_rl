@@ -66,9 +66,10 @@ def a_indices_to_coordinates(a_indices):
 
 def set_options(options):
     '''Set some game options, if given.'''
-    global grid_x, grid_y
+    global grid_x, grid_y, goal
     grid_x = options.get('grid_x', grid_x)
     grid_y = options.get('grid_y', grid_y)
+    goal = np.array((0, grid_x-1))
 
 def included(a, L):
     '''Returns if the np.array a is in a list of np.array's L.'''

@@ -230,7 +230,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_x': 4, 'grid_y': 4})
+        game.set_options({'grid_x': 8, 'grid_y': 8})
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
         policy_net_layers = [17, 64, 9]
