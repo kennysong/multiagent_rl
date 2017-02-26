@@ -25,6 +25,13 @@ if cuda: print('Running policy gradient on GPU.')
 FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
 ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
 
+# Define a EpisodeStep container for each step in an episode:
+#   s, a is the state-action pair visited during that step
+#   grad_W is gradient term sum(grad_W(log(p))); see train_policy_net()
+#   r is the reward received from that state-action pair
+#   G is the discounted return received from that state-action pair
+EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
+
 def run_episode(policy_net, gamma=1):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
        which is a LSTM that mapping states to actions, and returns the
@@ -33,13 +40,6 @@ def run_episode(policy_net, gamma=1):
        Returns:
        [EpisodeStep(t=0), ..., EpisodeStep(t=T)]
     '''
-    # Define a EpisodeStep container for each step in the episode:
-    #   s, a is the state-action pair visited during that step
-    #   grad_W is gradient term sum(grad_W(log(p))); see train_policy_net()
-    #   r is the reward received from that state-action pair
-    #   G is the discounted return received from that state-action pair
-    EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
-
     # Initialize state as player position
     state = game.start_state()
     episode = []
@@ -150,13 +150,12 @@ def run_policy_net(policy_net, state):
     '''
     # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
-    h_size, a_size = policy_net.layers[1], policy_net.layers[2]
+    global h_n, c_n, sum_log_p, h_size, a_size
     a_indices = []
     a_n = np.zeros(a_size)
-    global h_n, c_n
     h_n.data.zero_(); c_n.data.zero_()
+    sum_log_p.detach_(); sum_log_p.data.zero_()
     policy_net.zero_grad()
-    sum_log_p = Variable(ZeroTensor(1))
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
@@ -204,17 +203,21 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
        baseline is our MLP value network
        td is whether we use the TD parameter update
     '''
+    # Calculate baselines, if being used
+    if baseline:
+        baselines = [baseline(step.s) for step in episode]
+
     # Accumulate the update terms for each step in the episode into w_step
     for W in W_step: W.zero_()
     for t, step in enumerate(episode):
         s_t, G_t, r_t, grad_W = step.s, step.G, step.r, step.grad_W
         for i in range(len(W_step)):
             if baseline and not td:
-                W_step[i] += grad_W[i] * (G_t - baseline(s_t))
+                W_step[i] += grad_W[i] * (G_t - baselines[t])
             elif baseline and td:
                 if t == len(episode)-1: continue
                 s_tt = episode[t+1].s
-                W_step[i] += grad_W[i] * (r_t + baseline(s_tt) - baseline(s_t))
+                W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
             else:
                 W_step[i] += grad_W[i] * G_t
 
@@ -227,6 +230,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
+        game.set_options({'grid_x': 4, 'grid_y': 4})
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
         policy_net_layers = [17, 64, 9]
@@ -246,6 +250,7 @@ if __name__ == '__main__':
     h_size, a_size = policy_net_layers[1], policy_net_layers[2]
     h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
+    sum_log_p = Variable(ZeroTensor(1))
     #   Used in train_policy_net():
     W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
