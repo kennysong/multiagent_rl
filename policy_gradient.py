@@ -62,9 +62,9 @@ def run_episode(policy_net, gamma=1):
             break
 
     # We have the reward from each (state, action), now calculate the return
-    T = len(episode)
-    for i, step in enumerate(episode):
-        step.G = sum(gamma**(j-i) * episode[j].r for j in range(i, T))
+    for i, step in enumerate(reversed(episode)):
+        if i == 0: step.G = step.r
+        else: step.G = step.r + gamma*episode[len(episode)-i].G
 
     return episode
 
@@ -230,7 +230,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_x': 8, 'grid_y': 8})
+        game.set_options({'grid_x': 4, 'grid_y': 4})
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
         policy_net_layers = [17, 64, 9]
