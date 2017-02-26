@@ -264,7 +264,7 @@ if __name__ == '__main__':
             print("i: {} Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(i, num_episode, len(episode), cum_return, cum_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
 
-            if cum_return > -9:
+            if cum_return > -13:
                 print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
                 break
 
