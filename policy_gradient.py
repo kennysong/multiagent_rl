@@ -20,7 +20,7 @@ from torch.autograd import Variable
 
 # TODO(Martin): Review GPU code, is running suspiciously slowly
 # To run on GPU, change `cuda` to True
-cuda = False
+cuda = True
 if cuda: print('Running policy gradient on GPU.')
 FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
 ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
