@@ -18,9 +18,8 @@ import sys
 from namedlist import namedlist
 from torch.autograd import Variable
 
-# TODO(Martin): Review GPU code, is running suspiciously slowly
 # To run on GPU, change `cuda` to True
-cuda = True
+cuda = False
 if cuda: print('Running policy gradient on GPU.')
 FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
 ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
@@ -57,8 +56,8 @@ def run_episode(policy_net, gamma=1):
         state = next_s
 
         # This is taking ages
-        if len(episode) > 1000:
-            episode[-1].r -= 1000
+        if len(episode) > 100:
+            episode[-1].r -= 100
             break
 
     # We have the reward from each (state, action), now calculate the return
@@ -233,10 +232,10 @@ if __name__ == '__main__':
         game.set_options({'grid_y': 4, 'grid_x': 12})
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
-        policy_net_layers = [17, 64, 9]
-        value_net_layers = [8, 32, 1]
-        game.set_options({'rabbit_action': None, 'remove_hunters': False,
-                          'capture_reward': 5})
+        policy_net_layers = [17, 128, 9]
+        value_net_layers = [8, 64, 1]
+        game.set_options({'rabbit_action': None, 'remove_hunters': True,
+                          'capture_reward': 10})
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 
@@ -261,10 +260,10 @@ if __name__ == '__main__':
             value_error = train_value_net(value_net, episode)
             cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
             cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-            print("i: {} Num episode:{} Episode Len:{} Return:{} Baseline error:{}".format(i, num_episode, len(episode), cum_return, cum_value_error))
+            print("i: {} Num episode:{} Episode Len:{} Return:{} Cum Return:{} Baseline error:{}".format(i, num_episode, len(episode), episode[0].G, cum_return, cum_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
 
-            if cum_return > -13:
+            if cum_return > 0 and num_episode > 100:
                 print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
                 break
 

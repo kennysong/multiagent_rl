@@ -85,7 +85,7 @@ def perform_action(s, a_indices):
         hunter = hunter_pos[i:i+2]
         for j in range(0, len(rabbit_pos), 2):
             rabbit = rabbit_pos[j:j+2]
-            if np.array_equal(hunter, rabbit) and hunter[0] != -1:
+            if array_equal(hunter, rabbit) and hunter[0] != -1:
                 # A rabbit has been captured
                 rabbit_pos[j:j+2] = [-1, -1]
                 reward += capture_reward
@@ -122,6 +122,10 @@ def is_end(s):
     '''Given a state, return if the game should end.'''
     rabbit_pos = s[2*k:]
     return (rabbit_pos == -1).all()
+
+def array_equal(a, b):
+    '''Because np.array_equal() is too slow. Two-element arrays only.'''
+    return a[0] == b[0] and a[1] == b[1]
 
 def set_options(options):
     '''Set some game options, if given.'''
