@@ -206,7 +206,7 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
     if baseline:
         baselines = [baseline(step.s) for step in episode]
 
-    # Accumulate the update terms for each step in the episode into w_step
+    # Accumulate the update terms for each step in the episode into W_step
     for W in W_step: W.zero_()
     for t, step in enumerate(episode):
         s_t, G_t, r_t, grad_W = step.s, step.G, step.r, step.grad_W
@@ -214,6 +214,7 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
             if baseline and not td:
                 W_step[i] += grad_W[i] * (G_t - baselines[t])
             elif baseline and td:
+                # TODO: This does not work!
                 if t == len(episode)-1: continue
                 s_tt = episode[t+1].s
                 W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
@@ -221,21 +222,30 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
                 W_step[i] += grad_W[i] * G_t
 
     # Do a step of rprop
+    # for i, W in enumerate(policy_net.parameters()):
+    #     W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
+
+    # Do a step of RMSprop
+    eps = 1e-5  # For numerical stability
+    alpha = 0.9  # Weighted average factor
+    for i in range(len(W_step)):
+        mean_square[i] = alpha*mean_square[i] + (1-alpha)*W_step[i].pow(2)
+        W_step[i] = lr * W_step[i] / (mean_square[i] + eps).sqrt()
     for i, W in enumerate(policy_net.parameters()):
-        W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
+        W.data += W_step[i]
 
 if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == 'gridworld':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 12})
+        game.set_options({'grid_y': 4, 'grid_x': 4})
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
         policy_net_layers = [17, 128, 9]
         value_net_layers = [8, 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
-                          'capture_reward': 10})
+            'capture_reward': 10})
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
 
@@ -253,6 +263,8 @@ if __name__ == '__main__':
         sum_log_p = Variable(ZeroTensor(1))
         #   Used in train_policy_net():
         W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+        mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+        for W in mean_square: W += 1
 
         cum_value_error, cum_return = 0.0, 0.0
         for num_episode in range(10000):
