@@ -44,7 +44,7 @@ def perform_action(s, a_indices):
         s_next = start
         reward = -100
     # The action moved us off the grid, which results in stay
-    elif sa[0] < 0 or sa[0] >= grid_y or sa[1] < 0 or sa[1] >= grid_x:
+    elif (sa[0] < 0 or sa[0] >= grid_y) or (sa[1] < 0 or sa[1] >= grid_x):
         s_next = s
     else:
         s_next = sa

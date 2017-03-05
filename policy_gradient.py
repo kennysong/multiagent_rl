@@ -56,8 +56,8 @@ def run_episode(policy_net, gamma=1):
         state = next_s
 
         # This is taking ages
-        if len(episode) > 100:
-            episode[-1].r -= 100
+        if len(episode) > 1000:
+            episode[-1].r -= 1000
             break
 
     # We have the reward from each (state, action), now calculate the return
@@ -112,8 +112,8 @@ def run_value_net(value_net, state):
 def build_policy_net(layers):
     '''Builds an LSTM policy network, which maps states to action vectors.
 
-       More precisely, the input into the LSTM will be a 5-D vector consisting
-       of [prev_output, state]. The output of the LSTM will be a 3-D vector that
+       More precisely, the input into the LSTM will be a vector consisting of
+       [prev_output, state]. The output of the LSTM will be a vector that
        gives softmax probabilities of each action for the agents. This model
        only handles one time step, i.e. one agent, so it must be manually
        re-run for every agent.
@@ -230,6 +230,11 @@ if __name__ == '__main__':
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
         game.set_options({'grid_y': 4, 'grid_x': 12})
+    elif len(sys.argv) == 2 and sys.argv[1] == 'gridworld_3d':
+        import gridworld_3d as game
+        policy_net_layers = [6, 32, 3]
+        value_net_layers = [3, 32, 1]
+        game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
     elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
         import hunters as game
         policy_net_layers = [17, 128, 9]
@@ -237,7 +242,7 @@ if __name__ == '__main__':
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
                           'capture_reward': 10})
     else:
-        sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
+        sys.exit('Usage: python policy_gradient.py {gridworld, gridworld_3d, hunters}')
 
     for i in range(1000):
         policy_net = build_policy_net(policy_net_layers)
