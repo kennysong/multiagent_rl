@@ -17,8 +17,6 @@
     = {-1, 0, 1} x {-1, 0, 1} x {-1, 0, 1}.
 '''
 
-# TODO: Make this conform to the policy_gradient game interface
-
 import numpy as np
 import gridworld
 
