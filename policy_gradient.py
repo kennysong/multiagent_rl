@@ -79,7 +79,10 @@ def build_value_net(layers):
 
 def train_value_net(value_net, episode):
     '''Trains an MLP value function approximator based on the output of one
-       episode. The value network will map states to scalar values.
+       episode, i.e. first-visit Monte-Carlo policy evaluation. The value
+       network will map states to scalar values.
+
+       Warning: currently only works for integer-vector states!
 
        Parameters:
        episode is a list of EpisodeStep's
@@ -87,9 +90,18 @@ def train_value_net(value_net, episode):
        Returns:
        The scalar loss of the newly trained value network.
     '''
-    # Parse episode data into Numpy arrays of states and returns
-    states = Variable(FloatTensor([step.s for step in episode]))
-    returns = Variable(FloatTensor([step.G for step in episode]))
+    # Calculate return from the first visit to each state
+    visited_states = set()
+    states, returns = [], []
+    for i in range(len(episode)):
+        s, G = episode[i].s, episode[i].G
+        str_s = np.array_str(s.astype(int))  # Hashable state representation
+        if str_s not in visited_states:
+            visited_states.add(str_s)
+            states.append(s)
+            returns.append(G)
+    states = Variable(FloatTensor(states))
+    returns = Variable(FloatTensor(returns))
 
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
@@ -229,7 +241,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 12})
+        game.set_options({'grid_y': 7, 'grid_x': 7})
     elif len(sys.argv) == 2 and sys.argv[1] == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
@@ -268,9 +280,11 @@ if __name__ == '__main__':
             print("i: {} Num episode:{} Episode Len:{} Return:{} Cum Return:{} Baseline error:{}".format(i, num_episode, len(episode), episode[0].G, cum_return, cum_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
 
-            if cum_return > 0 and num_episode > 100:
-                print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
-                break
+            # if cum_return > -5 and num_episode > 100:
+            #     print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
+            #     break
+
+        break
 
         if num_episode == 9999:
             print("DID NOT LEARN. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
