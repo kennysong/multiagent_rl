@@ -76,7 +76,7 @@ def build_value_net(layers):
                   torch.nn.Tanh(),
                   torch.nn.Linear(layers[1], layers[2]))
     return value_net.cuda() if cuda else value_net
-
+@profile
 def train_value_net(value_net, episode):
     '''Trains an MLP value function approximator based on the output of one
        episode, i.e. first-visit Monte-Carlo policy evaluation. The value
@@ -95,7 +95,7 @@ def train_value_net(value_net, episode):
     states, returns = [], []
     for i in range(len(episode)):
         s, G = episode[i].s, episode[i].G
-        str_s = np.array_str(s.astype(int))  # Hashable state representation
+        str_s = s.astype(int).tostring()  # Fastest hashable state representation
         if str_s not in visited_states:
             visited_states.add(str_s)
             states.append(s)
