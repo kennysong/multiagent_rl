@@ -18,12 +18,6 @@ import sys
 from namedlist import namedlist
 from torch.autograd import Variable
 
-# To run on GPU, change `cuda` to True
-cuda = False
-if cuda: print('Running policy gradient on GPU.')
-FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
-ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
-
 # Define a EpisodeStep container for each step in an episode:
 #   s, a is the state-action pair visited during that step
 #   grad_W is gradient term sum(grad_W(log(p))); see train_policy_net()
@@ -56,8 +50,8 @@ def run_episode(policy_net, gamma=1):
         state = next_s
 
         # Terminate episode early
-        if len(episode) > 100:
-            episode[-1].r -= 100
+        if len(episode) > max_episode_len:
+            episode[-1].r += max_len_penalty
             break
 
     # We have the reward from each (state, action), now calculate the return
@@ -236,6 +230,17 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
     for i, W in enumerate(policy_net.parameters()):
         W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
 
+def set_options(options):
+    '''Sets policy gradient options.'''
+    global cuda, max_episode_len, max_len_penalty, FloatTensor, ZeroTensor
+    cuda = options.get('cuda', False)
+    max_episode_len = options.get('max_episode_len', float('inf'))
+    max_len_penalty = options.get('max_len_penalty', 0)
+
+    if cuda: print('Running policy gradient on GPU.')
+    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
+    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
+
 if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == 'gridworld':
         import gridworld as game
@@ -255,6 +260,9 @@ if __name__ == '__main__':
                           'capture_reward': 10})
     else:
         sys.exit('Usage: python policy_gradient.py {gridworld, gridworld_3d, hunters}')
+
+    # Set policy gradient options
+    set_options({'cuda': False, 'max_episode_len': 100, 'max_len_penalty': -100})
 
     for i in range(1000):
         policy_net = build_policy_net(policy_net_layers)
