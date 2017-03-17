@@ -55,13 +55,10 @@ def run_episode(policy_net, gamma=1):
         episode.append(EpisodeStep(s=state, a=a_indices, grad_W=grad_W, r=r))
         state = next_s
 
-        # This is taking ages
+        # Terminate episode early
         if len(episode) > 100:
             episode[-1].r -= 100
             break
-
-        # if len(episode) > 50000:
-        #     return False
 
     # We have the reward from each (state, action), now calculate the return
     for i, step in enumerate(reversed(episode)):
@@ -239,23 +236,6 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
     for i, W in enumerate(policy_net.parameters()):
         W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
 
-def v_star_4x4(state):
-    if np.allclose(state, [0, 0]) or np.allclose(state, [1, 0]) or \
-       np.allclose(state, [2, 0]) or np.allclose(state, [3, 0]) or \
-       np.allclose(state, [3, 1]) or np.allclose(state, [3, 2]) or \
-       np.allclose(state, [3, 3]):
-        return -3
-    elif np.allclose(state, [1, 1]) or np.allclose(state, [2, 1]) or \
-         np.allclose(state, [2, 2]) or np.allclose(state, [2, 3]):
-        return -2
-    elif np.allclose(state, [1, 2]) or np.allclose(state, [1, 3]):
-        return -1
-    elif np.allclose(state, [0, 3]):
-        return 0
-    elif np.allclose(state, [0, 1]) or np.allclose(state, [0, 2]):
-        return -103
-
-
 if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == 'gridworld':
         import gridworld as game
@@ -279,8 +259,7 @@ if __name__ == '__main__':
     for i in range(1000):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
-        # baseline = lambda state: run_value_net(value_net, state)
-        baseline = v_star_4x4
+        baseline = lambda state: run_value_net(value_net, state)
 
         # Init main Tensors first, so we don't have to allocate memory at runtime
         # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
@@ -293,26 +272,10 @@ if __name__ == '__main__':
         W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
         cum_value_error, cum_return = 0.0, 0.0
-        for num_episode in range(1000000):
+        for num_episode in range(10000):
             episode = run_episode(policy_net)
-            # if episode == False:
-            #     print('Episode over 50000 steps, skipping')
-            #     continue
-
             value_error = train_value_net(value_net, episode)
             cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
             cum_return = 0.9 * cum_return + 0.1 * episode[0].G
             print("i: {} Num episode:{} Episode Len:{} Return:{} Cum Return:{} Baseline error:{}".format(i, num_episode, len(episode), episode[0].G, cum_return, cum_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
-            # train_policy_net(policy_net, episode, baseline=None)
-
-            # if cum_return > -5 and num_episode > 100:
-            #     print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
-            #     break
-            # if num_episode > 1000 and len(episode) > 100:
-            #     raw_input()
-
-        break
-
-        if num_episode == 9999:
-            print("DID NOT LEARN. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
