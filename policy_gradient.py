@@ -10,10 +10,11 @@
       game.set_options(options) - set options for the game
 '''
 
+import argparse
 import numpy as np
 import random
-import torch
 import sys
+import torch
 
 from namedlist import namedlist
 from torch.autograd import Variable
@@ -233,36 +234,39 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
 def set_options(options):
     '''Sets policy gradient options.'''
     global cuda, max_episode_len, max_len_penalty, FloatTensor, ZeroTensor
-    cuda = options.get('cuda', False)
-    max_episode_len = options.get('max_episode_len', float('inf'))
-    max_len_penalty = options.get('max_len_penalty', 0)
+    cuda = options.cuda
+    max_episode_len = options.max_episode_len
+    max_len_penalty = options.max_len_penalty
 
     if cuda: print('Running policy gradient on GPU.')
     FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
     ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
 
 if __name__ == '__main__':
-    if len(sys.argv) == 2 and sys.argv[1] == 'gridworld':
+    parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
+    parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
+    parser.add_argument('--cuda', action='store_true', default=False, help='Include to run on CUDA')
+    parser.add_argument('--max_episode_len', default=float('inf'), help='Terminate episode early at this number of steps')
+    parser.add_argument('--max_len_penalty', default=0, help='If episode is terminated early, add this to the last reward')
+    args = parser.parse_args()
+    set_options(args)
+
+    if args.game == 'gridworld':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
         game.set_options({'grid_y': 4, 'grid_x': 4})
-    elif len(sys.argv) == 2 and sys.argv[1] == 'gridworld_3d':
+    elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
         value_net_layers = [3, 32, 1]
         game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
-    elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
+    elif args.game == 'hunters':
         import hunters as game
         policy_net_layers = [17, 128, 9]
         value_net_layers = [8, 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
                           'capture_reward': 10})
-    else:
-        sys.exit('Usage: python policy_gradient.py {gridworld, gridworld_3d, hunters}')
-
-    # Set policy gradient options
-    set_options({'cuda': False, 'max_episode_len': 100, 'max_len_penalty': -100})
 
     for i in range(1000):
         policy_net = build_policy_net(policy_net_layers)
