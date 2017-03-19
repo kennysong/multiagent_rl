@@ -246,8 +246,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
     parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
     parser.add_argument('--cuda', action='store_true', default=False, help='Include to run on CUDA')
-    parser.add_argument('--max_episode_len', default=float('inf'), help='Terminate episode early at this number of steps')
-    parser.add_argument('--max_len_penalty', default=0, help='If episode is terminated early, add this to the last reward')
+    parser.add_argument('--max_episode_len', type=float, default=float('inf'), help='Terminate episode early at this number of steps')
+    parser.add_argument('--max_len_penalty', type=float, default=0, help='If episode is terminated early, add this to the last reward')
+    parser.add_argument('--num_episodes', type=int, default=10000, help='Number of episodes to run in a round of training')
+    parser.add_argument('--num_rounds', type=int, default=1, help='How many rounds of training to run')
     args = parser.parse_args()
     set_options(args)
 
@@ -268,7 +270,7 @@ if __name__ == '__main__':
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
                           'capture_reward': 10})
 
-    for i in range(1000):
+    for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
         baseline = lambda state: run_value_net(value_net, state)
@@ -284,7 +286,7 @@ if __name__ == '__main__':
         W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
         cum_value_error, cum_return = 0.0, 0.0
-        for num_episode in range(10000):
+        for num_episode in range(args.num_episodes):
             episode = run_episode(policy_net)
             value_error = train_value_net(value_net, episode)
             cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
