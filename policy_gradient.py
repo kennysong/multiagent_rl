@@ -169,12 +169,11 @@ def run_policy_net(policy_net, state):
         # Predict action for the agent
         x_n = Variable(FloatTensor([np.append(a_n, state)]))
         dist, h_nn, c_nn = policy_net(x_n, h_n, c_n)
-        filt_dist = game.filter_action_space(np.array(dist[0].data.tolist()), state, n)
-        a_index = np.random.choice(range(a_size), p=filt_dist)
-
-        # flat_dist = np.array(dist[0].data.tolist())
-        # flat_dist /= sum(flat_dist)
-        # a_index = np.random.choice(range(a_size), p=flat_dist)
+        # filt_dist = game.filter_action_space(np.array(dist[0].data.tolist()), state, n)
+        # a_index = np.random.choice(range(a_size), p=filt_dist)
+        flat_dist = np.array(dist[0].data.tolist())
+        flat_dist /= sum(flat_dist)
+        a_index = np.random.choice(range(a_size), p=flat_dist)
 
         # Calculate sum(log(p))
         log_p = dist[0][a_index].log()
