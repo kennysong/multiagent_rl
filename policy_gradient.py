@@ -12,6 +12,7 @@
 
 import argparse
 import numpy as np
+import os
 import random
 import sys
 import torch
@@ -237,10 +238,13 @@ def set_options(options):
     cuda = options.cuda
     max_episode_len = options.max_episode_len
     max_len_penalty = options.max_len_penalty
-
-    if cuda: print('Running policy gradient on GPU.')
     FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
     ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
+    if cuda: print('Running policy gradient on GPU.')
+
+    # Transparently set number of threads, based on environment variables
+    num_threads = os.getenv('OMP_NUM_THREADS', 1)
+    torch.set_num_threads(num_threads)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
