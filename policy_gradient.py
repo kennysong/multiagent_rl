@@ -245,7 +245,7 @@ def set_options(options):
     if cuda: print('Running policy gradient on GPU.')
 
     # Transparently set number of threads, based on environment variables
-    num_threads = os.getenv('OMP_NUM_THREADS', 1)
+    num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
     torch.set_num_threads(num_threads)
 
 if __name__ == '__main__':
