@@ -132,12 +132,10 @@ def build_policy_net(layers):
             super(PolicyNet, self).__init__()
             self.lstm = torch.nn.LSTMCell(layers[0], layers[1])
             self.linear = torch.nn.Linear(layers[1], layers[2])
-            # self.softmax = torch.nn.Softmax()
             self.layers = layers
 
         def forward(self, x, h0, c0):
             h1, c1 = self.lstm(x, (h0, c0))
-            # o1 = self.softmax(self.linear(h1))
             o1 = self.linear(h1)
             return o1, h1, c1
 
