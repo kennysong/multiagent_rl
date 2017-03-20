@@ -73,7 +73,7 @@ def is_end(s):
     return np.array_equal(s, goal)
 
 def filter_actions(state, agent_no):
-    '''Filter the actions available for an agent in a given state. Returns a 
+    '''Filter the actions available for an agent in a given state. Returns a
        bitmap of available states.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     actions = [1, 1, 1]

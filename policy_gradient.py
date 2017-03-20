@@ -306,6 +306,3 @@ if __name__ == '__main__':
             cum_return = 0.9 * cum_return + 0.1 * episode[0].G
             print("i: {} Num episode:{} Episode Len:{} Return:{} Cum Return:{} Baseline error:{}".format(i, num_episode, len(episode), episode[0].G, cum_return, cum_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
-
-            if cum_return > -6 and len(episode) > 1000:
-                break
