@@ -7,6 +7,7 @@
       game.start_state() - returns start state of the game
       game.is_end(state) - given a state, return if the game/episode has ended
       game.perform_action(s, a) - given action indices at state s, returns next_s, reward
+      game.filter_actions(s, n) - filter actions available for an agent in a given state
       game.set_options(options) - set options for the game
 '''
 
@@ -177,8 +178,8 @@ def run_policy_net(policy_net, state):
         dist = softmax(filt_o_nn)
 
         # Randomly sample an available action from dist
-        filt_a = np.arange(a_size)[action_mask.numpy().astype(bool)]
-        a_index = np.random.choice(filt_a, p=dist[0].data.numpy())
+        filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
+        a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
 
         # Calculate sum(log(p))
         filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
@@ -305,3 +306,6 @@ if __name__ == '__main__':
             cum_return = 0.9 * cum_return + 0.1 * episode[0].G
             print("i: {} Num episode:{} Episode Len:{} Return:{} Cum Return:{} Baseline error:{}".format(i, num_episode, len(episode), episode[0].G, cum_return, cum_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
+
+            if cum_return > -6 and len(episode) > 1000:
+                break

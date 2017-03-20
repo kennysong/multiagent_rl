@@ -56,8 +56,6 @@ def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a 
        bitmap of available states.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    # dist = dist[0].data.clone().numpy()
-    # dist = np.copy(dist)
     actions = [1, 1, 1]
     # Vertical agent
     if agent_no == 0:
@@ -67,9 +65,6 @@ def filter_actions(state, agent_no):
     elif agent_no == 1:
         if state[1] == 0: actions[0] = 0
         elif state[1] == grid_x-1: actions[2] = 0
-    # Renomalize probability distribution
-    # dist /= sum(dist)
-    # return dist
     return actions
 
 def start_state():
