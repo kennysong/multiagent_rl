@@ -131,12 +131,13 @@ def build_policy_net(layers):
             super(PolicyNet, self).__init__()
             self.lstm = torch.nn.LSTMCell(layers[0], layers[1])
             self.linear = torch.nn.Linear(layers[1], layers[2])
-            self.softmax = torch.nn.Softmax()
+            # self.softmax = torch.nn.Softmax()
             self.layers = layers
 
         def forward(self, x, h0, c0):
             h1, c1 = self.lstm(x, (h0, c0))
-            o1 = self.softmax(self.linear(h1))
+            # o1 = self.softmax(self.linear(h1))
+            o1 = self.linear(h1)
             return o1, h1, c1
 
     policy_net = PolicyNet(layers)
@@ -163,21 +164,25 @@ def run_policy_net(policy_net, state):
     h_n.data.zero_(); c_n.data.zero_()
     sum_log_p.detach_(); sum_log_p.data.zero_()
     policy_net.zero_grad()
+    softmax = torch.nn.Softmax()
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # TODO(Martin): Why is renormalizing flat_dist necessary on CUDA?
-        # Predict action for the agent
+        # Do a forward step through policy_net, filter actions, and softmax it
         x_n = Variable(FloatTensor([np.append(a_n, state)]))
-        dist, h_nn, c_nn = policy_net(x_n, h_n, c_n)
-        # filt_dist = game.filter_action_space(np.array(dist[0].data.tolist()), state, n)
-        # a_index = np.random.choice(range(a_size), p=filt_dist)
-        flat_dist = np.array(dist[0].data.tolist())
-        flat_dist /= sum(flat_dist)
-        a_index = np.random.choice(range(a_size), p=flat_dist)
+        o_nn, h_nn, c_nn = policy_net(x_n, h_n, c_n)
+        action_mask = ByteTensor(game.filter_actions(state, n))
+        filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
+        dist = softmax(filt_o_nn)
+
+        # Randomly sample an available action from dist
+        filt_a = np.arange(a_size)[action_mask.numpy().astype(bool)]
+        a_index = np.random.choice(filt_a, p=dist[0].data.numpy())
 
         # Calculate sum(log(p))
-        log_p = dist[0][a_index].log()
+        filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
+        log_p = dist[0][filt_a_index].log()
         sum_log_p += log_p
 
         # Record action for this iteration/agent
@@ -236,12 +241,13 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
 
 def set_options(options):
     '''Sets policy gradient options.'''
-    global cuda, max_episode_len, max_len_penalty, FloatTensor, ZeroTensor
+    global cuda, max_episode_len, max_len_penalty, FloatTensor, ZeroTensor, ByteTensor
     cuda = options.cuda
     max_episode_len = options.max_episode_len
     max_len_penalty = options.max_len_penalty
     FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
     ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
+    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
     if cuda: print('Running policy gradient on GPU.')
 
     # Transparently set number of threads, based on environment variables
@@ -263,7 +269,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_y': 7, 'grid_x': 7})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
