@@ -187,7 +187,7 @@ def run_policy_net(policy_net, state):
         a_indices.append(a_index)
 
         # Prepare inputs for next iteration/agent
-        h_n, c_n = Variable(h_nn.data), Variable(c_n.data)
+        h_n, c_n = Variable(h_nn.data), Variable(c_nn.data)
         a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
@@ -267,7 +267,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 7, 'grid_x': 7})
+        game.set_options({'grid_y': 4, 'grid_x': 4})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
