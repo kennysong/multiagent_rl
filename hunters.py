@@ -118,6 +118,13 @@ def opposite_direction(s, a, i):
     # Calculate opposite direction
     return np.sign(rabbit - closest_hunter)
 
+def filter_actions(state, agent_no):
+    '''Filter the actions available for an agent in a given state. Returns a
+       bitmap of available states.
+       E.g. an agent in a corner is not allowed to move into a wall.'''
+    # TODO: Implement this!
+    raise NotImplementedError('Need to implement filter_actions() for hunters')
+
 def is_end(s):
     '''Given a state, return if the game should end.'''
     rabbit_pos = s[2*k:]
