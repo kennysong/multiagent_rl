@@ -197,7 +197,8 @@ def run_policy_net(policy_net, state):
 
     return a_indices, grad_W
 
-def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
+def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3,
+                     opt='rmsprop'):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, for each time-step t in the
@@ -214,6 +215,7 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
        episode is an list of EpisodeStep's
        baseline is our MLP value network
        td is whether we use the TD parameter update
+       opt is the optimizer to use, either 'rmsprop' or 'rprop'
     '''
     # Calculate baselines, if being used
     if baseline:
@@ -234,18 +236,17 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
             else:
                 W_step[i] += grad_W[i] * G_t
 
-    # Do a step of rprop
-    # for i, W in enumerate(policy_net.parameters()):
-    #     W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
-
-    # Do a step of RMSprop
-    eps = 1e-5  # For numerical stability
-    alpha = 0.9  # Weighted average factor
-    for i in range(len(W_step)):
-        mean_square[i] = alpha*mean_square[i] + (1-alpha)*W_step[i].pow(2)
-        W_step[i] = lr * W_step[i] / (mean_square[i] + eps).sqrt()
-    for i, W in enumerate(policy_net.parameters()):
-        W.data += W_step[i]
+    if opt == 'rprop':  # Do a step of rprop
+        for i, W in enumerate(policy_net.parameters()):
+            W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
+    elif opt == 'rmsprop':  # Do a step of RMSprop
+        eps = 1e-5  # For numerical stability
+        alpha = 0.9  # Weighted average factor
+        for i in range(len(W_step)):
+            mean_square[i] = alpha*mean_square[i] + (1-alpha)*W_step[i].pow(2)
+            W_step[i] = lr * W_step[i] / (mean_square[i] + eps).sqrt()
+        for i, W in enumerate(policy_net.parameters()):
+            W.data += W_step[i]
 
 def set_options(options):
     '''Sets policy gradient options.'''
@@ -270,6 +271,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_len_penalty', type=float, default=0, help='If episode is terminated early, add this to the last reward')
     parser.add_argument('--num_episodes', type=int, default=10000, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', type=int, default=1, help='How many rounds of training to run')
+    parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
     args = parser.parse_args()
     set_options(args)
 
@@ -314,4 +316,4 @@ if __name__ == '__main__':
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, baseline=baseline)
+            train_policy_net(policy_net, episode, baseline=baseline, opt=args.policy_net_opt)
