@@ -7,22 +7,19 @@
       game.start_state() - returns start state of the game
       game.is_end(state) - given a state, return if the game/episode has ended
       game.perform_action(s, a) - given action indices at state s, returns next_s, reward
+      game.filter_actions(s, n) - filter actions available for an agent in a given state
       game.set_options(options) - set options for the game
 '''
 
+import argparse
 import numpy as np
+import os
 import random
-import torch
 import sys
+import torch
 
 from namedlist import namedlist
 from torch.autograd import Variable
-
-# To run on GPU, change `cuda` to True
-cuda = False
-if cuda: print('Running policy gradient on GPU.')
-FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
-ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
 
 # Define a EpisodeStep container for each step in an episode:
 #   s, a is the state-action pair visited during that step
@@ -55,9 +52,9 @@ def run_episode(policy_net, gamma=1):
         episode.append(EpisodeStep(s=state, a=a_indices, grad_W=grad_W, r=r))
         state = next_s
 
-        # This is taking ages
-        if len(episode) > 100:
-            episode[-1].r -= 100
+        # Terminate episode early
+        if len(episode) > max_episode_len:
+            episode[-1].r += max_len_penalty
             break
 
     # We have the reward from each (state, action), now calculate the return
@@ -79,7 +76,10 @@ def build_value_net(layers):
 
 def train_value_net(value_net, episode):
     '''Trains an MLP value function approximator based on the output of one
-       episode. The value network will map states to scalar values.
+       episode, i.e. first-visit Monte-Carlo policy evaluation. The value
+       network will map states to scalar values.
+
+       Warning: currently only works for integer-vector states!
 
        Parameters:
        episode is a list of EpisodeStep's
@@ -87,9 +87,18 @@ def train_value_net(value_net, episode):
        Returns:
        The scalar loss of the newly trained value network.
     '''
-    # Parse episode data into Numpy arrays of states and returns
-    states = Variable(FloatTensor([step.s for step in episode]))
-    returns = Variable(FloatTensor([step.G for step in episode]))
+    # Calculate return from the first visit to each state
+    visited_states = set()
+    states, returns = [], []
+    for i in range(len(episode)):
+        s, G = episode[i].s, episode[i].G
+        str_s = s.astype(int).tostring()  # Fastest hashable state representation
+        if str_s not in visited_states:
+            visited_states.add(str_s)
+            states.append(s)
+            returns.append(G)
+    states = Variable(FloatTensor(states))
+    returns = Variable(FloatTensor(returns))
 
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
@@ -112,8 +121,8 @@ def run_value_net(value_net, state):
 def build_policy_net(layers):
     '''Builds an LSTM policy network, which maps states to action vectors.
 
-       More precisely, the input into the LSTM will be a 5-D vector consisting
-       of [prev_output, state]. The output of the LSTM will be a 3-D vector that
+       More precisely, the input into the LSTM will be a vector consisting of
+       [prev_output, state]. The output of the LSTM will be a vector that
        gives softmax probabilities of each action for the agents. This model
        only handles one time step, i.e. one agent, so it must be manually
        re-run for every agent.
@@ -123,12 +132,11 @@ def build_policy_net(layers):
             super(PolicyNet, self).__init__()
             self.lstm = torch.nn.LSTMCell(layers[0], layers[1])
             self.linear = torch.nn.Linear(layers[1], layers[2])
-            self.softmax = torch.nn.Softmax()
             self.layers = layers
 
         def forward(self, x, h0, c0):
             h1, c1 = self.lstm(x, (h0, c0))
-            o1 = self.softmax(self.linear(h1))
+            o1 = self.linear(h1)
             return o1, h1, c1
 
     policy_net = PolicyNet(layers)
@@ -155,26 +163,31 @@ def run_policy_net(policy_net, state):
     h_n.data.zero_(); c_n.data.zero_()
     sum_log_p.detach_(); sum_log_p.data.zero_()
     policy_net.zero_grad()
+    softmax = torch.nn.Softmax()
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
-        # TODO(Martin): Why is renormalizing flat_dist necessary on CUDA?
-        # Predict action for the agent
+        # Do a forward step through policy_net, filter actions, and softmax it
         x_n = Variable(FloatTensor([np.append(a_n, state)]))
-        dist, h_nn, c_nn = policy_net(x_n, h_n, c_n)
-        flat_dist = np.array(dist[0].data.tolist())
-        flat_dist /= sum(flat_dist)
-        a_index = np.random.choice(range(a_size), p=flat_dist)
+        o_nn, h_nn, c_nn = policy_net(x_n, h_n, c_n)
+        action_mask = ByteTensor(game.filter_actions(state, n))
+        filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
+        dist = softmax(filt_o_nn)
+
+        # Randomly sample an available action from dist
+        filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
+        a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
 
         # Calculate sum(log(p))
-        log_p = dist[0][a_index].log()
+        filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
+        log_p = dist[0][filt_a_index].log()
         sum_log_p += log_p
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
 
         # Prepare inputs for next iteration/agent
-        h_n, c_n = Variable(h_nn.data), Variable(c_n.data)
+        h_n, c_n = Variable(h_nn.data), Variable(c_nn.data)
         a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
@@ -234,22 +247,50 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3):
     for i, W in enumerate(policy_net.parameters()):
         W.data += W_step[i]
 
+def set_options(options):
+    '''Sets policy gradient options.'''
+    global cuda, max_episode_len, max_len_penalty, FloatTensor, ZeroTensor, ByteTensor
+    cuda = options.cuda
+    max_episode_len = options.max_episode_len
+    max_len_penalty = options.max_len_penalty
+    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
+    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
+    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
+    if cuda: print('Running policy gradient on GPU.')
+
+    # Transparently set number of threads, based on environment variables
+    num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
+    torch.set_num_threads(num_threads)
+
 if __name__ == '__main__':
-    if len(sys.argv) == 2 and sys.argv[1] == 'gridworld':
+    parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
+    parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
+    parser.add_argument('--cuda', action='store_true', default=False, help='Include to run on CUDA')
+    parser.add_argument('--max_episode_len', type=float, default=float('inf'), help='Terminate episode early at this number of steps')
+    parser.add_argument('--max_len_penalty', type=float, default=0, help='If episode is terminated early, add this to the last reward')
+    parser.add_argument('--num_episodes', type=int, default=10000, help='Number of episodes to run in a round of training')
+    parser.add_argument('--num_rounds', type=int, default=1, help='How many rounds of training to run')
+    args = parser.parse_args()
+    set_options(args)
+
+    if args.game == 'gridworld':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
         game.set_options({'grid_y': 4, 'grid_x': 4})
-    elif len(sys.argv) == 2 and sys.argv[1] == 'hunters':
+    elif args.game == 'gridworld_3d':
+        import gridworld_3d as game
+        policy_net_layers = [6, 32, 3]
+        value_net_layers = [3, 32, 1]
+        game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
+    elif args.game == 'hunters':
         import hunters as game
         policy_net_layers = [17, 128, 9]
         value_net_layers = [8, 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
-            'capture_reward': 10})
-    else:
-        sys.exit('Usage: python policy_gradient.py {gridworld, hunters}')
+                          'capture_reward': 10})
 
-    for i in range(1000):
+    for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
         baseline = lambda state: run_value_net(value_net, state)
@@ -266,18 +307,11 @@ if __name__ == '__main__':
         mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
         for W in mean_square: W += 1
 
-        cum_value_error, cum_return = 0.0, 0.0
-        for num_episode in range(10000):
+        avg_value_error, avg_return = 0.0, 0.0
+        for num_episode in range(args.num_episodes):
             episode = run_episode(policy_net)
             value_error = train_value_net(value_net, episode)
-            cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
-            cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-            print("i: {} Num episode:{} Episode Len:{} Return:{} Cum Return:{} Baseline error:{}".format(i, num_episode, len(episode), episode[0].G, cum_return, cum_value_error))
+            avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
+            avg_return = 0.9 * avg_return + 0.1 * episode[0].G
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
-
-            if cum_return > 0 and num_episode > 100:
-                print("LEARNED. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))
-                break
-
-        if num_episode == 9999:
-            print("DID NOT LEARN. len: {}. {{'episodes': {}, 'cum_return': {}, 'cum_value_error': {} }},".format(len(episode), num_episode, cum_return, cum_value_error))

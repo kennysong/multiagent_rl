@@ -15,8 +15,9 @@
     -1 reward, and stepping into the cliff incurs -100 reward and a reset to
     the start. An episode terminates when the player reaches the goal.
 
-    Note: the action space is {up, stay, down} x {left, stay, right},
-    vectorized as {-1, 0, 1} x {-1, 0, 1}, including diagonal movements.
+    The action space indices correspond to:
+    Agent 1: [up, stay, down]
+    Agent 2: [left, stay, right]
 '''
 
 import numpy as np
@@ -44,12 +45,27 @@ def perform_action(s, a_indices):
         s_next = start
         reward = -100
     # The action moved us off the grid, which results in stay
-    elif sa[0] < 0 or sa[0] >= grid_y or sa[1] < 0 or sa[1] >= grid_x:
+    elif (sa[0] < 0 or sa[0] >= grid_y) or (sa[1] < 0 or sa[1] >= grid_x):
         s_next = s
     else:
         s_next = sa
 
     return (s_next, reward)
+
+def filter_actions(state, agent_no):
+    '''Filter the actions available for an agent in a given state. Returns a 
+       bitmap of available states.
+       E.g. an agent in a corner is not allowed to move into a wall.'''
+    actions = [1, 1, 1]
+    # Vertical agent
+    if agent_no == 0:
+        if state[0] == 0: actions[0] = 0
+        elif state[0] == grid_y-1: actions[2] = 0
+    # Horizontal agent
+    elif agent_no == 1:
+        if state[1] == 0: actions[0] = 0
+        elif state[1] == grid_x-1: actions[2] = 0
+    return actions
 
 def start_state():
     '''Returns the start state of the game.'''
