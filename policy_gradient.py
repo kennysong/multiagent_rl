@@ -295,11 +295,11 @@ if __name__ == '__main__':
         #   Used in train_policy_net():
         W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
 
-        cum_value_error, cum_return = 0.0, 0.0
+        avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
             episode = run_episode(policy_net)
             value_error = train_value_net(value_net, episode)
-            cum_value_error = 0.9 * cum_value_error + 0.1 * value_error
-            cum_return = 0.9 * cum_return + 0.1 * episode[0].G
-            print("i: {} Num episode:{} Episode Len:{} Return:{} Cum Return:{} Baseline error:{}".format(i, num_episode, len(episode), episode[0].G, cum_return, cum_value_error))
+            avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
+            avg_return = 0.9 * avg_return + 0.1 * episode[0].G
+            print("{{i: {}, num_episode: {}, episode_len: {}, episode_return: {}, avg_return: {}, avg_value_error: {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
