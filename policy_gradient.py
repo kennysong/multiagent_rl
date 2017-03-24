@@ -301,5 +301,5 @@ if __name__ == '__main__':
             value_error = train_value_net(value_net, episode)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            print("{{i: {}, num_episode: {}, episode_len: {}, episode_return: {}, avg_return: {}, avg_value_error: {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
             train_policy_net(policy_net, episode, baseline=baseline)
