@@ -40,8 +40,8 @@ def perform_action(s, a_indices):
        (s_next, reward)'''
     # Do some input validation
     a = a_indices_to_coordinates(a_indices)
-    assert included(s, state_space)
-    assert included(a, action_space)
+    # assert included(s, state_space)
+    # assert included(a, action_space)
 
     # Calculate the next state and reward
     reward = -1

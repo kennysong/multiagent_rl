@@ -197,7 +197,7 @@ def run_policy_net(policy_net, state):
 
     return a_indices, grad_W
 
-def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3,
+def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
                      opt='rmsprop'):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
@@ -213,8 +213,8 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3,
        Parameters:
        model is our LSTM policy network
        episode is an list of EpisodeStep's
-       baseline is our MLP value network
-       td is whether we use the TD parameter update
+       baseline is function mapping states to values
+       td is the k for a TD(k) gradient term, td=None for a Monte-Carlo term
        opt is the optimizer to use, either 'rmsprop' or 'rprop'
     '''
     # Calculate baselines, if being used
@@ -226,13 +226,46 @@ def train_policy_net(policy_net, episode, baseline=None, td=False, lr=3*1e-3,
     for t, step in enumerate(episode):
         s_t, G_t, r_t, grad_W = step.s, step.G, step.r, step.grad_W
         for i in range(len(W_step)):
-            if baseline and not td:
+            # Monte-Carlo baselined update
+            if baseline and td is None:
                 W_step[i] += grad_W[i] * (G_t - baselines[t])
-            elif baseline and td:
-                # TODO: This does not work!
-                if t == len(episode)-1: continue
-                s_tt = episode[t+1].s
-                W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
+            # TD(0) baselined update
+            elif baseline and td == 0:
+                if t == len(episode)-1:
+                    W_step[i] += grad_W[i] * (r_t - baselines[t])
+                else:
+                    W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
+            # TD(1) baselined update
+            elif baseline and td == 1:
+                if t == len(episode)-1:
+                    W_step[i] += grad_W[i] * (r_t - baselines[t])
+                elif t == len(episode)-2:
+                    W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
+                else:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
+            # TD(2) baselined update
+            elif baseline and td == 2:
+                if t == len(episode)-1:
+                    W_step[i] += grad_W[i] * (r_t - baselines[t])
+                elif t == len(episode)-2:
+                    W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
+                elif t == len(episode)-3:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
+                else:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
+            # TD(3) baselined update
+            elif baseline and td == 3:
+                if t == len(episode)-1:
+                    W_step[i] += grad_W[i] * (r_t - baselines[t])
+                elif t == len(episode)-2:
+                    W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
+                elif t == len(episode)-3:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
+                elif t == len(episode)-4:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
+                else:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + baselines[t+4] - baselines[t])
+            # Monte-Carlo update without baseline
             else:
                 W_step[i] += grad_W[i] * G_t
 
@@ -259,7 +292,7 @@ def set_options(options):
     ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
     if cuda: print('Running policy gradient on GPU.')
 
-    # Transparently set number of threads, based on environment variables
+    # Transparently set number of threads based on environment variables
     num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
     torch.set_num_threads(num_threads)
 
@@ -267,11 +300,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
     parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
     parser.add_argument('--cuda', action='store_true', default=False, help='Include to run on CUDA')
-    parser.add_argument('--max_episode_len', type=float, default=float('inf'), help='Terminate episode early at this number of steps')
-    parser.add_argument('--max_len_penalty', type=float, default=0, help='If episode is terminated early, add this to the last reward')
-    parser.add_argument('--num_episodes', type=int, default=10000, help='Number of episodes to run in a round of training')
-    parser.add_argument('--num_rounds', type=int, default=1, help='How many rounds of training to run')
+    parser.add_argument('--max_episode_len', default=float('inf'), type=float, help='Terminate episode early at this number of steps')
+    parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
+    parser.add_argument('--num_episodes', default=10000, type=int, help='Number of episodes to run in a round of training')
+    parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
+    parser.add_argument('--policy_net_update', choices=[0, 1, 2, 3], type=int, help='k for a TD(k) gradient term; exclude for a Monte-Carlo update')
     args = parser.parse_args()
     set_options(args)
 
@@ -316,4 +350,4 @@ if __name__ == '__main__':
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, baseline=baseline, opt=args.policy_net_opt)
+            train_policy_net(policy_net, episode, baseline=baseline, td=args.policy_net_update, opt=args.policy_net_opt)
