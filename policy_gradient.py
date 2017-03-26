@@ -241,7 +241,6 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
                 if t == len(episode)-1:
                     W_step[i] += grad_W[i] * (r_t - baselines[t])
                 elif t == len(episode)-2:
-                    # W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
                 else:
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
@@ -250,10 +249,8 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
                 if t == len(episode)-1:
                     W_step[i] += grad_W[i] * (r_t - baselines[t])
                 elif t == len(episode)-2:
-                    # W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
                 elif t == len(episode)-3:
-                    # W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r - baselines[t])
                 else:
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
@@ -262,13 +259,10 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
                 if t == len(episode)-1:
                     W_step[i] += grad_W[i] * (r_t - baselines[t])
                 elif t == len(episode)-2:
-                    # W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
                 elif t == len(episode)-3:
-                    # W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r - baselines[t])
                 elif t == len(episode)-4:
-                    # W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r - baselines[t])
                 else:
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + baselines[t+4] - baselines[t])
@@ -277,16 +271,12 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
                 if t == len(episode)-1:
                     W_step[i] += grad_W[i] * (r_t - baselines[t])
                 elif t == len(episode)-2:
-                    # W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
                 elif t == len(episode)-3:
-                    # W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r - baselines[t])
                 elif t == len(episode)-4:
-                    # W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r - baselines[t])
                 elif t == len(episode)-5:
-                    # W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + baselines[t+4] - baselines[t])
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + episode[t+4].r - baselines[t])
                 else:
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + episode[t+4].r + baselines[t+5] - baselines[t])
