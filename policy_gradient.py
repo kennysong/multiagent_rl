@@ -265,6 +265,20 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
                 else:
                     W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + baselines[t+4] - baselines[t])
+            # TD(4) baselined update
+            elif baseline and td == 4:
+                if t == len(episode)-1:
+                    W_step[i] += grad_W[i] * (r_t - baselines[t])
+                elif t == len(episode)-2:
+                    W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
+                elif t == len(episode)-3:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
+                elif t == len(episode)-4:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
+                elif t == len(episode)-5:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + baselines[t+4] - baselines[t])
+                else:
+                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + episode[t+4].r + baselines[t+5] - baselines[t])
             # Monte-Carlo update without baseline
             else:
                 W_step[i] += grad_W[i] * G_t
@@ -305,7 +319,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_episodes', default=10000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
-    parser.add_argument('--policy_net_update', choices=[0, 1, 2, 3], type=int, help='k for a TD(k) gradient term; exclude for a Monte-Carlo update')
+    parser.add_argument('--policy_net_update', choices=[0, 1, 2, 3, 4], type=int, help='k for a TD(k) gradient term; exclude for a Monte-Carlo update')
     args = parser.parse_args()
     set_options(args)
 
@@ -313,7 +327,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_y': 7, 'grid_x': 7})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
