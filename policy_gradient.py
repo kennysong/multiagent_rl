@@ -221,6 +221,7 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
     if baseline:
         baselines = [baseline(step.s) for step in episode]
 
+    # TODO: Add gamma term to TD updates
     # Accumulate the update terms for each step in the episode into W_step
     for W in W_step: W.zero_()
     for t, step in enumerate(episode):
