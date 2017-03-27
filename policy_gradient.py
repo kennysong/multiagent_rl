@@ -369,10 +369,10 @@ def set_options(options):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
     parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
-    parser.add_argument('--cuda', action='store_true', default=False, help='Include to run on CUDA')
+    parser.add_argument('--cuda', default=False, action='store_true', help='Include to run on CUDA')
     parser.add_argument('--max_episode_len', default=float('inf'), type=float, help='Terminate episode early at this number of steps')
     parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
-    parser.add_argument('--num_episodes', default=10000, type=int, help='Number of episodes to run in a round of training')
+    parser.add_argument('--num_episodes', default=100000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
     parser.add_argument('--td_update', choices=[0, 1, 2, 3, 4], type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
