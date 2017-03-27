@@ -74,7 +74,7 @@ def build_value_net(layers):
                   torch.nn.Linear(layers[1], layers[2]))
     return value_net.cuda() if cuda else value_net
 
-def train_value_net(value_net, episode):
+def train_value_net(value_net, episode, td=None):
     '''Trains an MLP value function approximator based on the output of one
        episode, i.e. first-visit Monte-Carlo policy evaluation. The value
        network will map states to scalar values.
@@ -82,21 +82,75 @@ def train_value_net(value_net, episode):
        Warning: currently only works for integer-vector states!
 
        Parameters:
+       value_net is the value network to be trained
        episode is a list of EpisodeStep's
+       td is the k for a TD(k) return, td=None for a Monte-Carlo return
 
        Returns:
        The scalar loss of the newly trained value network.
     '''
+    # Pre-compute values, if being used
+    values = [run_value_net(value_net, step.s) for step in episode]
+
+    # TODO: Add gamma term to TD updates
     # Calculate return from the first visit to each state
     visited_states = set()
     states, returns = [], []
     for i in range(len(episode)):
-        s, G = episode[i].s, episode[i].G
+        s, r, G = episode[i].s, episode[i].r, episode[i].G
         str_s = s.astype(int).tostring()  # Fastest hashable state representation
         if str_s not in visited_states:
             visited_states.add(str_s)
             states.append(s)
-            returns.append(G)
+
+            if td is None:  # Monte-Carlo return
+                returns.append(G)
+            elif td == 0:  # TD(0) return
+                if i == len(episode)-1:
+                    returns.append(r)
+                else:
+                    returns.append(r + values[i+1])
+            elif td == 1:  # TD(1) return
+                if i == len(episode)-1:
+                    returns.append(r)
+                elif i == len(episode)-2:
+                    returns.append(r + episode[i+1].r)
+                else:
+                    returns.append(r + episode[i+1].r + values[i+2])
+            elif td == 2:  # TD(2) return
+                if i == len(episode)-1:
+                    returns.append(r)
+                elif i == len(episode)-2:
+                    returns.append(r + episode[i+1].r)
+                elif i == len(episode)-3:
+                    returns.append(r + episode[i+1].r + episode[i+2].r)
+                else:
+                    returns.append(r + episode[i+1].r + episode[i+2].r + values[i+3])
+            elif td == 3:  # TD(3) return
+                if i == len(episode)-1:
+                    returns.append(r)
+                elif i == len(episode)-2:
+                    returns.append(r + episode[i+1].r)
+                elif i == len(episode)-3:
+                    returns.append(r + episode[i+1].r + episode[i+2].r)
+                elif i == len(episode)-4:
+                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r)
+                else:
+                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r + values[i+4])
+            elif td == 4:  # TD(4) return
+                if i == len(episode)-1:
+                    returns.append(r)
+                elif i == len(episode)-2:
+                    returns.append(r + episode[i+1].r)
+                elif i == len(episode)-3:
+                    returns.append(r + episode[i+1].r + episode[i+2].r)
+                elif i == len(episode)-4:
+                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r)
+                elif i == len(episode)-5:
+                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r + episode[i+4].r)
+                else:
+                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r + episode[i+4].r + values[i+5])
+
     states = Variable(FloatTensor(states))
     returns = Variable(FloatTensor(returns))
 
@@ -217,7 +271,7 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
        td is the k for a TD(k) gradient term, td=None for a Monte-Carlo term
        opt is the optimizer to use, either 'rmsprop' or 'rprop'
     '''
-    # Calculate baselines, if being used
+    # Pre-compute baselines, if being used
     if baseline:
         baselines = [baseline(step.s) for step in episode]
 
@@ -320,7 +374,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_episodes', default=10000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
-    parser.add_argument('--policy_net_update', choices=[0, 1, 2, 3, 4], type=int, help='k for a TD(k) gradient term; exclude for a Monte-Carlo update')
+    parser.add_argument('--td_update', choices=[0, 1, 2, 3, 4], type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     args = parser.parse_args()
     set_options(args)
 
@@ -328,7 +382,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 7, 'grid_x': 7})
+        game.set_options({'grid_y': 4, 'grid_x': 4})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
@@ -361,8 +415,8 @@ if __name__ == '__main__':
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
             episode = run_episode(policy_net)
-            value_error = train_value_net(value_net, episode)
+            value_error = train_value_net(value_net, episode, td=args.td_update)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, baseline=baseline, td=args.policy_net_update, opt=args.policy_net_opt)
+            train_policy_net(policy_net, episode, baseline=baseline, td=args.td_update, opt=args.policy_net_opt)
