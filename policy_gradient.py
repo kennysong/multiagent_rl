@@ -90,7 +90,8 @@ def train_value_net(value_net, episode, td=None):
        The scalar loss of the newly trained value network.
     '''
     # Pre-compute values, if being used
-    values = [run_value_net(value_net, step.s) for step in episode]
+    if td is not None:
+        values = [run_value_net(value_net, step.s) for step in episode]
 
     # TODO: Add gamma term to TD updates
     # Calculate return from the first visit to each state
@@ -272,7 +273,7 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
        opt is the optimizer to use, either 'rmsprop' or 'rprop'
     '''
     # Pre-compute baselines, if being used
-    if baseline:
+    if baseline is not None:
         baselines = [baseline(step.s) for step in episode]
 
     # TODO: Add gamma term to TD updates
