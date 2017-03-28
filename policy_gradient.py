@@ -28,7 +28,7 @@ from torch.autograd import Variable
 #   G is the discounted return received from that state-action pair
 EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
 
-def run_episode(policy_net, gamma=1):
+def run_episode(policy_net, gamma=1.0):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
        which is a LSTM that mapping states to actions, and returns the
        probabilities of those actions. gamma is the discount factor.
@@ -74,7 +74,7 @@ def build_value_net(layers):
                   torch.nn.Linear(layers[1], layers[2]))
     return value_net.cuda() if cuda else value_net
 
-def train_value_net(value_net, episode, td=None):
+def train_value_net(value_net, episode, td=None, gamma=1.0):
     '''Trains an MLP value function approximator based on the output of one
        episode, i.e. first-visit Monte-Carlo policy evaluation. The value
        network will map states to scalar values.
@@ -85,6 +85,7 @@ def train_value_net(value_net, episode, td=None):
        value_net is the value network to be trained
        episode is a list of EpisodeStep's
        td is the k for a TD(k) return, td=None for a Monte-Carlo return
+       gamma is the discount term used for TD(k) returns
 
        Returns:
        The scalar loss of the newly trained value network.
@@ -97,61 +98,24 @@ def train_value_net(value_net, episode, td=None):
     # Calculate return from the first visit to each state
     visited_states = set()
     states, returns = [], []
-    for i in range(len(episode)):
-        s, r, G = episode[i].s, episode[i].r, episode[i].G
+    for t in range(len(episode)):
+        s, G = episode[t].s, episode[t].G
         str_s = s.astype(int).tostring()  # Fastest hashable state representation
         if str_s not in visited_states:
             visited_states.add(str_s)
             states.append(s)
 
-            if td is None:  # Monte-Carlo return
+            # Monte-Carlo return
+            if td is None:
                 returns.append(G)
-            elif td == 0:  # TD(0) return
-                if i == len(episode)-1:
-                    returns.append(r)
+            # TD return
+            elif td >= 0:
+                t_end = t + td + 1  # TD requires we look forward until t_end
+                if t_end < len(episode):
+                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, t_end)]) + values[t_end]
                 else:
-                    returns.append(r + values[i+1])
-            elif td == 1:  # TD(1) return
-                if i == len(episode)-1:
-                    returns.append(r)
-                elif i == len(episode)-2:
-                    returns.append(r + episode[i+1].r)
-                else:
-                    returns.append(r + episode[i+1].r + values[i+2])
-            elif td == 2:  # TD(2) return
-                if i == len(episode)-1:
-                    returns.append(r)
-                elif i == len(episode)-2:
-                    returns.append(r + episode[i+1].r)
-                elif i == len(episode)-3:
-                    returns.append(r + episode[i+1].r + episode[i+2].r)
-                else:
-                    returns.append(r + episode[i+1].r + episode[i+2].r + values[i+3])
-            elif td == 3:  # TD(3) return
-                if i == len(episode)-1:
-                    returns.append(r)
-                elif i == len(episode)-2:
-                    returns.append(r + episode[i+1].r)
-                elif i == len(episode)-3:
-                    returns.append(r + episode[i+1].r + episode[i+2].r)
-                elif i == len(episode)-4:
-                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r)
-                else:
-                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r + values[i+4])
-            elif td == 4:  # TD(4) return
-                if i == len(episode)-1:
-                    returns.append(r)
-                elif i == len(episode)-2:
-                    returns.append(r + episode[i+1].r)
-                elif i == len(episode)-3:
-                    returns.append(r + episode[i+1].r + episode[i+2].r)
-                elif i == len(episode)-4:
-                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r)
-                elif i == len(episode)-5:
-                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r + episode[i+4].r)
-                else:
-                    returns.append(r + episode[i+1].r + episode[i+2].r + episode[i+3].r + episode[i+4].r + values[i+5])
-
+                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, len(episode))])
+                returns.append(r)
     states = Variable(FloatTensor(states))
     returns = Variable(FloatTensor(returns))
 
@@ -252,8 +216,8 @@ def run_policy_net(policy_net, state):
 
     return a_indices, grad_W
 
-def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
-                     opt='rmsprop'):
+def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
+                     lr=3*1e-3, opt='rmsprop'):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, for each time-step t in the
@@ -268,73 +232,34 @@ def train_policy_net(policy_net, episode, baseline=None, td=None, lr=3*1e-3,
        Parameters:
        model is our LSTM policy network
        episode is an list of EpisodeStep's
-       baseline is function mapping states to values
-       td is the k for a TD(k) gradient term, td=None for a Monte-Carlo term
+       val_baseline is a value network used as the baseline term
+       td is the k for a TD(k) estimate of G_t (requires val_baseline),
+         td=None for a Monte-Carlo G_t
+       gamma is the discount term used for a TD(k) gradient term
        opt is the optimizer to use, either 'rmsprop' or 'rprop'
     '''
     # Pre-compute baselines, if being used
-    if baseline is not None:
-        baselines = [baseline(step.s) for step in episode]
+    if val_baseline is not None:
+        values = [run_value_net(val_baseline, step.s) for step in episode]
 
     # TODO: Add gamma term to TD updates
     # Accumulate the update terms for each step in the episode into W_step
     for W in W_step: W.zero_()
     for t, step in enumerate(episode):
-        s_t, G_t, r_t, grad_W = step.s, step.G, step.r, step.grad_W
+        s_t, G_t, grad_W = step.s, step.G, step.grad_W
         for i in range(len(W_step)):
             # Monte-Carlo baselined update
-            if baseline and td is None:
-                W_step[i] += grad_W[i] * (G_t - baselines[t])
-            # TD(0) baselined update
-            elif baseline and td == 0:
-                if t == len(episode)-1:
-                    W_step[i] += grad_W[i] * (r_t - baselines[t])
+            if val_baseline and td is None:
+                W_step[i] += grad_W[i] * (G_t - values[t])
+            # TD baselined update
+            elif val_baseline and td >= 0:
+                t_end = t + td + 1  # TD requires we look forward until t_end
+                if t_end < len(episode):
+                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, t_end)])
+                    W_step[i] += grad_W[i] * (r + values[t_end] - values[t])
                 else:
-                    W_step[i] += grad_W[i] * (r_t + baselines[t+1] - baselines[t])
-            # TD(1) baselined update
-            elif baseline and td == 1:
-                if t == len(episode)-1:
-                    W_step[i] += grad_W[i] * (r_t - baselines[t])
-                elif t == len(episode)-2:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
-                else:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + baselines[t+2] - baselines[t])
-            # TD(2) baselined update
-            elif baseline and td == 2:
-                if t == len(episode)-1:
-                    W_step[i] += grad_W[i] * (r_t - baselines[t])
-                elif t == len(episode)-2:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
-                elif t == len(episode)-3:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r - baselines[t])
-                else:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + baselines[t+3] - baselines[t])
-            # TD(3) baselined update
-            elif baseline and td == 3:
-                if t == len(episode)-1:
-                    W_step[i] += grad_W[i] * (r_t - baselines[t])
-                elif t == len(episode)-2:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
-                elif t == len(episode)-3:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r - baselines[t])
-                elif t == len(episode)-4:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r - baselines[t])
-                else:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + baselines[t+4] - baselines[t])
-            # TD(4) baselined update
-            elif baseline and td == 4:
-                if t == len(episode)-1:
-                    W_step[i] += grad_W[i] * (r_t - baselines[t])
-                elif t == len(episode)-2:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r - baselines[t])
-                elif t == len(episode)-3:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r - baselines[t])
-                elif t == len(episode)-4:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r - baselines[t])
-                elif t == len(episode)-5:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + episode[t+4].r - baselines[t])
-                else:
-                    W_step[i] += grad_W[i] * (r_t + episode[t+1].r + episode[t+2].r + episode[t+3].r + episode[t+4].r + baselines[t+5] - baselines[t])
+                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, len(episode))])
+                    W_step[i] += grad_W[i] * (r - values[t])
             # Monte-Carlo update without baseline
             else:
                 W_step[i] += grad_W[i] * G_t
@@ -375,7 +300,8 @@ if __name__ == '__main__':
     parser.add_argument('--num_episodes', default=100000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
-    parser.add_argument('--td_update', choices=[0, 1, 2, 3, 4], type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
+    parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
+    parser.add_argument('--td_gamma', default=1, type=float, help='Discount factor for a TD(k) update term')
     args = parser.parse_args()
     set_options(args)
 
@@ -399,7 +325,6 @@ if __name__ == '__main__':
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
-        baseline = lambda state: run_value_net(value_net, state)
 
         # Init main Tensors first, so we don't have to allocate memory at runtime
         # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
@@ -416,8 +341,8 @@ if __name__ == '__main__':
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
             episode = run_episode(policy_net)
-            value_error = train_value_net(value_net, episode, td=args.td_update)
+            value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.td_gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, baseline=baseline, td=args.td_update, opt=args.policy_net_opt)
+            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.td_gamma, opt=args.policy_net_opt)
