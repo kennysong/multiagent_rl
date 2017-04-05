@@ -52,6 +52,21 @@ def perform_action(s, a_indices):
 
     return (s_next, reward)
 
+def filter_actions(state, agent_no):
+    '''Filter the actions available for an agent in a given state. Returns a
+       bitmap of available states.
+       E.g. an agent in a corner is not allowed to move into a wall.'''
+    actions = [1, 1, 1]
+    # Vertical agent
+    if agent_no == 0:
+        if state[0] == 0: actions[0] = 0
+        elif state[0] == grid_y-1: actions[2] = 0
+    # Horizontal agent
+    elif agent_no == 1:
+        if state[1] == 0: actions[0] = 0
+        elif state[1] == grid_x-1: actions[2] = 0
+    return actions
+
 def start_state():
     '''Returns the start state of the game.'''
     return start
