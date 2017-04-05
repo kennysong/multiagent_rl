@@ -33,6 +33,10 @@ def run_episode(policy_net, gamma=1.0):
        which is a LSTM that mapping states to actions, and returns the
        probabilities of those actions. gamma is the discount factor.
 
+       Parameters:
+       policy_net is our LSTM policy network
+       gamma is the discount factor for calculating returns
+
        Returns:
        [EpisodeStep(t=0), ..., EpisodeStep(t=T)]
     '''
@@ -193,7 +197,7 @@ def run_policy_net(policy_net, state):
         filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
         dist = softmax(filt_o_nn)
 
-        # Randomly sample an available action from dist
+        # Sample an available action from dist
         filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
         a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
 
@@ -230,7 +234,7 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
        (Note: The sum is over the number of agents, each with an associated p)
 
        Parameters:
-       model is our LSTM policy network
+       policy_net is our LSTM policy network
        episode is an list of EpisodeStep's
        val_baseline is a value network used as the baseline term
        td is the k for a TD(k) estimate of G_t (requires val_baseline),
@@ -301,7 +305,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
-    parser.add_argument('--td_gamma', default=1, type=float, help='Discount factor for a TD(k) update term')
+    parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
     args = parser.parse_args()
     set_options(args)
 
@@ -340,9 +344,9 @@ if __name__ == '__main__':
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
-            episode = run_episode(policy_net)
-            value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.td_gamma)
+            episode = run_episode(policy_net, gamma=args.gamma)
+            value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.td_gamma, opt=args.policy_net_opt)
+            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt)
