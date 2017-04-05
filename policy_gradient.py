@@ -98,7 +98,6 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
     if td is not None:
         values = [run_value_net(value_net, step.s) for step in episode]
 
-    # TODO: Add gamma term to TD updates
     # Calculate return from the first visit to each state
     visited_states = set()
     states, returns = [], []
@@ -246,7 +245,6 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
     if val_baseline is not None:
         values = [run_value_net(val_baseline, step.s) for step in episode]
 
-    # TODO: Add gamma term to TD updates
     # Accumulate the update terms for each step in the episode into W_step
     for W in W_step: W.zero_()
     for t, step in enumerate(episode):
