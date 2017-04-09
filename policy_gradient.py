@@ -1,8 +1,7 @@
 '''
-    This is a policy gradient implementation (REINFORCE with v(s) baseline)
-    on the two-agent Gridworld Cliff environment.
+    This is a multi-agent policy gradient implementation (REINFORCE with
+    baselines) for any game that conforms to the interface:
 
-    Games should conform to the interface:
       game.num_agents - number of agents
       game.start_state() - returns start state of the game
       game.is_end(state) - given a state, return if the game/episode has ended
@@ -30,8 +29,7 @@ EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
 
 def run_episode(policy_net, gamma=1.0):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
-       which is a LSTM that mapping states to actions, and returns the
-       probabilities of those actions. gamma is the discount factor.
+       which is a LSTM that maps states to action probabilities.
 
        Parameters:
        policy_net is our LSTM policy network
@@ -70,7 +68,7 @@ def run_episode(policy_net, gamma=1.0):
 
 def build_value_net(layers):
     '''Builds an MLP value function approximator, which maps states to scalar
-       values. It has one hidden layer with 32 units and tanh activations.
+       values. It has one hidden layer with tanh activations.
     '''
     value_net = torch.nn.Sequential(
                   torch.nn.Linear(layers[0], layers[1]),
@@ -145,9 +143,9 @@ def build_policy_net(layers):
 
        More precisely, the input into the LSTM will be a vector consisting of
        [prev_output, state]. The output of the LSTM will be a vector that
-       gives softmax probabilities of each action for the agents. This model
-       only handles one time step, i.e. one agent, so it must be manually
-       re-run for every agent.
+       gives unnormalized probabilities of each action for the agents; softmax
+       is applied afterwards, see run_policy_net(). This model only handles one
+       time step, i.e. one agent, so it must be manually re-run for each agent.
     '''
     class PolicyNet(torch.nn.Module):
         def __init__(self, layers):
@@ -179,7 +177,7 @@ def run_policy_net(policy_net, state):
     '''
     # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
-    global h_n, c_n, sum_log_p, h_size, a_size
+    global h_n, c_n, sum_log_p
     a_indices = []
     a_n = np.zeros(a_size)
     h_n.data.zero_(); c_n.data.zero_()
@@ -227,10 +225,10 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
        episode, make the update:
          W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
             = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
-            = alpha * [sum(grad_W(log(p))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
 
-       (Note: The sum is over the number of agents, each with an associated p)
+       (Notes: The sum is over the number of agents, each with an associated p
+               The grad_W(sum(log_p)) are pre-computed in each EpisodeStep)
 
        Parameters:
        policy_net is our LSTM policy network
