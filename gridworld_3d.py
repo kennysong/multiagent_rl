@@ -54,15 +54,16 @@ def perform_action(s, a_indices):
     ):
         s_next = start
         reward = -100
-    # The action moved us off the grid, which results in stay
-    elif (sa[0] < 0 or sa[0] >= grid_z) or \
-         (sa[1] < 0 or sa[1] >= grid_y) or \
-         (sa[2] < 0 or sa[2] >= grid_x):
-        s_next = s
     else:
         s_next = sa
 
     return (s_next, reward)
+
+def perform_joint_action(s, joint_a):
+    '''Performs an action given by joint_a in state s. Returns:
+       (s_next, reward)'''
+    a_indices = joint_action_to_indices(joint_a)
+    return perform_action(s, a_indices)
 
 def start_state():
     '''Returns the start state of the game.'''
@@ -87,14 +88,34 @@ def filter_actions(state, agent_no):
         elif state[1] == grid_y-1: actions[2] = 0
     # x-agent
     elif agent_no == 2:
-        if state[1] == 0: actions[0] = 0
-        elif state[1] == grid_x-1: actions[2] = 0
+        if state[2] == 0: actions[0] = 0
+        elif state[2] == grid_x-1: actions[2] = 0
     return actions
+
+def filter_joint_actions(state):
+    '''Filters the joint actions available in a given state. Returns a bitmap
+       of available states.
+       E.g. an agent in a corner is not allowed to move into a wall.'''
+    avail_a = [1] * 27
+    for i in range(len(action_space)):
+        # Check if action moves us off the grid
+        a = action_space[i]
+        sa = state + a
+        if (sa[0] < 0 or sa[0] >= grid_z) or \
+           (sa[1] < 0 or sa[1] >= grid_y) or \
+           (sa[2] < 0 or sa[2] >= grid_x):
+            avail_a[i] = 0
+    return avail_a
 
 def a_indices_to_coordinates(a_indices):
     '''Converts a list of action indices to action coordinates.'''
     coords = [i-1 for i in a_indices]
     return coords
+
+def joint_action_to_indices(joint_a):
+    '''Convert a joint action into action indices.'''
+    a = action_space[joint_a.index(1)] + 1
+    return a.tolist()
 
 def set_options(options):
     '''Set some game options, if given.'''

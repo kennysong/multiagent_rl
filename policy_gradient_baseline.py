@@ -129,7 +129,7 @@ def set_options(options):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
-    parser.add_argument('--game', choices=['gridworld'], required=True, help='A game to run')
+    parser.add_argument('--game', choices=['gridworld', 'gridworld_3d'], required=True, help='A game to run')
     parser.add_argument('--cuda', default=False, action='store_true', help='Include to run on CUDA')
     parser.add_argument('--max_episode_len', default=float('inf'), type=float, help='Terminate episode early at this number of steps')
     parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
@@ -146,6 +146,11 @@ if __name__ == '__main__':
         policy_net_layers = [2, 32, 9]
         value_net_layers = [2, 32, 1]
         game.set_options({'grid_y': 4, 'grid_x': 4})
+    if args.game == 'gridworld_3d':
+        import gridworld_3d as game
+        policy_net_layers = [3, 64, 27]
+        value_net_layers = [3, 32, 1]
+        game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
