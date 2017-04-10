@@ -212,10 +212,9 @@ def run_policy_net(policy_net, state):
         a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
-    # Get the gradients, clipping between [-1, 1]
-    # Note: clamp() necessarily makes a copy as parameter Tensors are reused
+    # Get the gradients; clone() is needed as the parameter Tensors are reused
     sum_log_p.backward()
-    grad_W = [W.grad.data.clamp(-1, 1) for W in policy_net.parameters()]
+    grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
 
     return a_indices, grad_W
 
