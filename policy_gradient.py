@@ -200,7 +200,7 @@ def run_policy_net(policy_net, state):
 
         # Calculate sum(log(p))
         filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
-        log_p = dist[0][filt_a_index].log()
+        log_p = (dist[0][filt_a_index] + 1e-8).log()
         sum_log_p += log_p
 
         # Record action for this iteration/agent
@@ -213,7 +213,7 @@ def run_policy_net(policy_net, state):
 
     # Get the gradients; clone() is needed as the parameter Tensors are reused
     sum_log_p.backward()
-    grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
+    grad_W = [W.grad.data.clamp(-1, 1) for W in policy_net.parameters()]
 
     return a_indices, grad_W
 
