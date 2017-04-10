@@ -124,6 +124,7 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
     loss_fn = torch.nn.L1Loss()
     optimizer = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
+    # TODO(Martin): Clip gradients here?
     # Train the value network on states, returns
     optimizer.zero_grad()
     loss = loss_fn(value_net(states), returns)
@@ -198,7 +199,7 @@ def run_policy_net(policy_net, state):
         filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
         a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
 
-        # Calculate sum(log(p))
+        # Calculate sum(log(p + eps)); eps for numerical stability
         filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
         log_p = (dist[0][filt_a_index] + 1e-8).log()
         sum_log_p += log_p
@@ -211,7 +212,8 @@ def run_policy_net(policy_net, state):
         a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
-    # Get the gradients; clone() is needed as the parameter Tensors are reused
+    # Get the gradients, clipping between [-1, 1]
+    # Note: clamp() necessarily makes a copy as parameter Tensors are reused
     sum_log_p.backward()
     grad_W = [W.grad.data.clamp(-1, 1) for W in policy_net.parameters()]
 

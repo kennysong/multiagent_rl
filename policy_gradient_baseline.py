@@ -100,11 +100,12 @@ def run_policy_net(policy_net, state):
     a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
     a[a_index] = 1
 
-    # Calculate log(p)
+    # Calculate log(p + eps); eps for numerical stability
     filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
-    log_p = dist[0][filt_a_index].log()
+    log_p = (dist[0][filt_a_index] + 1e-8).log()
 
-    # Get the gradients; clone() is needed as the parameter Tensors are reused
+    # Get the gradients, clipping between [-1, 1]
+    # Note: clamp() necessarily makes a copy as parameter Tensors are reused
     log_p.backward()
     grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
 
