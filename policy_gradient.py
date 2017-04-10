@@ -218,7 +218,7 @@ def run_policy_net(policy_net, state):
     return a_indices, grad_W
 
 def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
-                     lr=3*1e-3, opt='rmsprop'):
+                     lr=3*1e-3, opt='rmsprop', gc=False):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        For each parameter W of the policy network, for each time-step t in the
@@ -264,6 +264,11 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
             else:
                 W_step[i] += grad_W[i] * G_t
 
+    # Gradient clipping
+    if gc:
+        for i in range(len(W_step)):
+            W_step[i].clamp_(-1,1)
+
     if opt == 'rprop':  # Do a step of rprop
         for i, W in enumerate(policy_net.parameters()):
             W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
@@ -302,6 +307,7 @@ if __name__ == '__main__':
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
+    parser.add_argument('--gc', default=False, action='store_true', help='Include to use gradient clipping')
     args = parser.parse_args()
     set_options(args)
 
@@ -345,4 +351,4 @@ if __name__ == '__main__':
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt)
+            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt, gc=args.gc)
