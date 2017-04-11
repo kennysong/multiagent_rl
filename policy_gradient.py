@@ -122,14 +122,13 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
 
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
-    optimizer = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
     # TODO(Martin): Clip gradients here?
     # Train the value network on states, returns
-    optimizer.zero_grad()
+    optimizer_valuenet.zero_grad()
     loss = loss_fn(value_net(states), returns)
     loss.backward()
-    optimizer.step()
+    optimizer_valuenet.step()
 
     return loss.data[0]
 
@@ -181,7 +180,7 @@ def run_policy_net(policy_net, state):
     global h_n, c_n, sum_log_p
     a_indices = []
     a_n = np.zeros(a_size)
-    h_n.data.zero_(); c_n.data.zero_()
+    h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     sum_log_p.detach_(); sum_log_p.data.zero_()
     policy_net.zero_grad()
     softmax = torch.nn.Softmax()
@@ -190,7 +189,7 @@ def run_policy_net(policy_net, state):
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
         x_n = Variable(FloatTensor([np.append(a_n, state)]))
-        o_nn, h_nn, c_nn = policy_net(x_n, h_n, c_n)
+        o_nn, h_n, c_n = policy_net(x_n, h_n, c_n)
         action_mask = ByteTensor(game.filter_actions(state, n))
         filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
         dist = softmax(filt_o_nn)
@@ -208,7 +207,6 @@ def run_policy_net(policy_net, state):
         a_indices.append(a_index)
 
         # Prepare inputs for next iteration/agent
-        h_n, c_n = Variable(h_nn.data), Variable(c_nn.data)
         a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
@@ -308,7 +306,7 @@ if __name__ == '__main__':
     parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
-    parser.add_argument('--gc', default=False, action='store_true', help='Include to use gradient clipping')
+    parser.add_argument('--nogc', default=False, action='store_true', help='Include to disable gradient clipping')
     args = parser.parse_args()
     set_options(args)
 
@@ -333,12 +331,12 @@ if __name__ == '__main__':
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
+        optimizer_valuenet = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
         # Init main Tensors first, so we don't have to allocate memory at runtime
         # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
         #   Used in run_policy_net():
         h_size, a_size = policy_net_layers[1], policy_net_layers[2]
-        h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
         x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
         sum_log_p = Variable(ZeroTensor(1))
         #   Used in train_policy_net():
@@ -353,4 +351,4 @@ if __name__ == '__main__':
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt, gc=args.gc)
+            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt, gc=not args.nogc)
