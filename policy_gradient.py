@@ -122,14 +122,13 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
 
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
-    optimizer = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
     # TODO(Martin): Clip gradients here?
     # Train the value network on states, returns
-    optimizer.zero_grad()
+    optimizer_valuenet.zero_grad()
     loss = loss_fn(value_net(states), returns)
     loss.backward()
-    optimizer.step()
+    optimizer_valuenet.step()
 
     return loss.data[0]
 
@@ -331,6 +330,7 @@ if __name__ == '__main__':
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
+        optimizer_valuenet = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
         # Init main Tensors first, so we don't have to allocate memory at runtime
         # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
