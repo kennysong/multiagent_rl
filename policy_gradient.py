@@ -181,7 +181,7 @@ def run_policy_net(policy_net, state):
     global h_n, c_n, sum_log_p
     a_indices = []
     a_n = np.zeros(a_size)
-    h_n.data.zero_(); c_n.data.zero_()
+    h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     sum_log_p.detach_(); sum_log_p.data.zero_()
     policy_net.zero_grad()
     softmax = torch.nn.Softmax()
@@ -190,7 +190,7 @@ def run_policy_net(policy_net, state):
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
         x_n = Variable(FloatTensor([np.append(a_n, state)]))
-        o_nn, h_nn, c_nn = policy_net(x_n, h_n, c_n)
+        o_nn, h_n, c_n = policy_net(x_n, h_n, c_n)
         action_mask = ByteTensor(game.filter_actions(state, n))
         filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
         dist = softmax(filt_o_nn)
@@ -208,7 +208,6 @@ def run_policy_net(policy_net, state):
         a_indices.append(a_index)
 
         # Prepare inputs for next iteration/agent
-        h_n, c_n = Variable(h_nn.data), Variable(c_nn.data)
         a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
@@ -337,7 +336,6 @@ if __name__ == '__main__':
         # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
         #   Used in run_policy_net():
         h_size, a_size = policy_net_layers[1], policy_net_layers[2]
-        h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
         x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
         sum_log_p = Variable(ZeroTensor(1))
         #   Used in train_policy_net():
