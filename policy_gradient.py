@@ -123,14 +123,13 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
 
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
-    optimizer = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
     # TODO(Martin): Clip gradients here?
     # Train the value network on states, returns
-    optimizer.zero_grad()
+    optimizer_value.zero_grad()
     loss = loss_fn(value_net(states), returns)
     loss.backward()
-    optimizer.step()
+    optimizer_value.step()
 
     return loss.data[0]
 
@@ -258,11 +257,20 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
                 input_batch[i, j, step.a[i-1]] = 1
     input_batch = Variable(input_batch)
 
-    x_n_batch = input_batch[0, :, :]
+    
+    logprobs = Varible(ZeroTensor(len(episode)))
     for i in range(num_agents):
-        o_nn, h_n_batch, c_n_batch = policy_net(x_n, h_n, c_n)
-
+        o_nn, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n, c_n)
+        dist = softmax(o_nn) # This is episode x action
         
+        for j, step in enumerate(episode):
+            logprobs[j] += torch.log(dist[j, step.a[i]])
+
+    values = torch.Tensor(np.asarray(values))
+    returns = ...
+    performance = (logprobs * (values - returns)).sum()
+
+    performance.backward()  
         
 
 
@@ -357,6 +365,7 @@ if __name__ == '__main__':
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
+        optimizer_value = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
         # Init main Tensors first, so we don't have to allocate memory at runtime
         # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
