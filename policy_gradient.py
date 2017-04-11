@@ -25,7 +25,7 @@ from torch.autograd import Variable
 #   grad_W is gradient term sum(grad_W(log(p))); see train_policy_net()
 #   r is the reward received from that state-action pair
 #   G is the discounted return received from that state-action pair
-EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
+EpisodeStep = namedlist('EpisodeStep', 's a r G', default=0)
 
 def run_episode(policy_net, gamma=1.0):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
@@ -51,7 +51,7 @@ def run_episode(policy_net, gamma=1.0):
         next_s, r = game.perform_action(state, a_indices)
 
         # Record state, action, grad_W, reward
-        episode.append(EpisodeStep(s=state, a=a_indices, grad_W=grad_W, r=r))
+        episode.append(EpisodeStep(s=state, a=a_indices, r=r))
         state = next_s
 
         # Terminate episode early
@@ -175,21 +175,24 @@ def run_policy_net(policy_net, state):
        For each parameter W, the gradient term `grad_W(sum(log(p)))` is also
        computed and returned. This is used in the REINFORCE algorithm; see
        train_policy_net().
+
+       Parameters:
+           policy_net: the LSTM that given (x_n, h_n, c_n) returns o_nn, h_nn, c_nn
+           state: state of the MDP
     '''
     # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
-    global h_n, c_n, sum_log_p
     a_indices = []
     a_n = np.zeros(a_size)
     h_n.data.zero_(); c_n.data.zero_()
-    sum_log_p.detach_(); sum_log_p.data.zero_()
     policy_net.zero_grad()
     softmax = torch.nn.Softmax()
-
+    
+    x_n = Variable(FloatTensor([np.append(a_n, state)]))
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
-        x_n = Variable(FloatTensor([np.append(a_n, state)]))
+        x_n.data.copy_(torch.Tensor([np.append(a_n, state)]))
         o_nn, h_nn, c_nn = policy_net(x_n, h_n, c_n)
         action_mask = ByteTensor(game.filter_actions(state, n))
         filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
@@ -201,8 +204,6 @@ def run_policy_net(policy_net, state):
 
         # Calculate sum(log(p + eps)); eps for numerical stability
         filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
-        log_p = (dist[0][filt_a_index] + 1e-8).log()
-        sum_log_p += log_p
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
@@ -212,11 +213,7 @@ def run_policy_net(policy_net, state):
         a_n = np.zeros(a_size)
         a_n[a_index] = 1
 
-    # Get the gradients; clone() is needed as the parameter Tensors are reused
-    sum_log_p.backward()
-    grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
-
-    return a_indices, grad_W
+    return a_indices
 
 def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
                      lr=3*1e-3, opt='rmsprop', gc=False):
@@ -282,21 +279,6 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
         for i, W in enumerate(policy_net.parameters()):
             W.data += W_step[i]
 
-def set_options(options):
-    '''Sets policy gradient options.'''
-    global cuda, max_episode_len, max_len_penalty, FloatTensor, ZeroTensor, ByteTensor
-    cuda = options.cuda
-    max_episode_len = options.max_episode_len
-    max_len_penalty = options.max_len_penalty
-    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
-    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
-    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
-    if cuda: print('Running policy gradient on GPU.')
-
-    # Transparently set number of threads based on environment variables
-    num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
-    torch.set_num_threads(num_threads)
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
     parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
@@ -310,7 +292,16 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
     parser.add_argument('--gc', default=False, action='store_true', help='Include to use gradient clipping')
     args = parser.parse_args()
-    set_options(args)
+    
+    # Sets options for PG
+    cuda = options.cuda
+    max_episode_len = options.max_episode_len
+    max_len_penalty = options.max_len_penalty
+    if cuda: print('Running policy gradient on GPU.')
+
+    # Transparently set number of threads based on environment variables
+    num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
+    torch.set_num_threads(num_threads)
 
     if args.game == 'gridworld':
         import gridworld as game
@@ -328,6 +319,9 @@ if __name__ == '__main__':
         value_net_layers = [8, 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
                           'capture_reward': 10})
+    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
+    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
+    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
@@ -339,7 +333,6 @@ if __name__ == '__main__':
         h_size, a_size = policy_net_layers[1], policy_net_layers[2]
         h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
         x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
-        sum_log_p = Variable(ZeroTensor(1))
         #   Used in train_policy_net():
         W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
         mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
