@@ -45,7 +45,7 @@ def run_episode(policy_net, gamma=1.0):
     # Run game until agent reaches the end
     while not game.is_end(state):
         # Let our agent decide that to do at this state
-        a_indices, grad_W = run_policy_net(policy_net, state)
+        a_indices = run_policy_net(policy_net, state)
 
         # Take that action, then the game gives us the next state and reward
         next_s, r = game.perform_action(state, a_indices)
@@ -189,6 +189,8 @@ def run_policy_net(policy_net, state):
     softmax = torch.nn.Softmax()
     
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
+    if cuda:
+        x_n.cuda()
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
@@ -242,6 +244,7 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
         values = [run_value_net(val_baseline, step.s) for step in episode]
 
     # Accumulate the update terms for each step in the episode into W_step
+    """
     for W in W_step: W.zero_()
     for t, step in enumerate(episode):
         s_t, G_t, grad_W = step.s, step.G, step.grad_W
@@ -261,6 +264,9 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
             # Monte-Carlo update without baseline
             else:
                 W_step[i] += grad_W[i] * G_t
+    """
+
+    # Compute logprobs for 
 
     # Gradient clipping
     if gc:
@@ -334,7 +340,6 @@ if __name__ == '__main__':
         h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
         x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
         #   Used in train_policy_net():
-        W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
         mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
         for W in mean_square: W += 1
 
