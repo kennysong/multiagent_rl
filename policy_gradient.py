@@ -324,10 +324,11 @@ if __name__ == '__main__':
         game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
     elif args.game == 'hunters':
         import hunters as game
-        policy_net_layers = [21, 128, 9]
-        value_net_layers = [12, 64, 1]
-        game.set_options({'rabbit_action': None, 'remove_hunters': True,
-                          'capture_reward': 0})
+        k, m = 2, 2
+        policy_net_layers = [3*(k+m) + 9, 128, 9]
+        value_net_layers = [3*(k+m), 64, 1]
+        game.set_options({'rabbit_action': None, 'remove_hunter': True,
+                          'capture_reward': 10, 'k': k, 'm': m})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)

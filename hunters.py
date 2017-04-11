@@ -60,7 +60,6 @@ def perform_action(s, a_indices):
     assert valid_state(s)
     assert valid_action(a)
 
-    # TODO: Need to filter rabbit actions too
     # Calculate rabbit actions
     if rabbit_action is None:
         rabbit_a = np.zeros(2*m, dtype=np.int)
@@ -101,30 +100,6 @@ def perform_action(s, a_indices):
     s_next = np.concatenate((hunter_pos, rabbit_pos))
     return s_next, reward
 
-def opposite_direction(s, a, i):
-    '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid
-       the closest hunter (after hunters take action a).
-    '''
-    raise NotImplementedError('TODO: allow rabbits to move in opposite direction')
-    # # Calculate hunter positions after a
-    # hunter_s = np.array(s[:2*k])
-    # for j in range(2*k):
-    #     if hunter_s[j] == -1:
-    #         continue
-    #     elif 0 <= hunter_s[j] + a[j] < n:
-    #         hunter_s[j] += a[j]
-
-    # # Find position of closest hunter
-    # rabbit = s[i:i+2]
-    # distance = float('inf')
-    # for j in range(0, 2*k, 2):
-    #     d = np.linalg.norm(rabbit - s[j:j+2])
-    #     if d < distance:
-    #         closest_hunter = s[j:j+2]
-
-    # # Calculate opposite direction
-    # return np.sign(rabbit - closest_hunter)
-
 def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
        bitmap of available actions. Hunters out of the game are filtered the
@@ -151,10 +126,14 @@ def array_equal(a, b):
 
 def set_options(options):
     '''Set some game options, if given.'''
-    global rabbit_action, remove_hunter, capture_reward
+    global rabbit_action, remove_hunter, capture_reward, n, k, m, num_agents
     rabbit_action = options.get('rabbit_action', rabbit_action)
     remove_hunter = options.get('remove_hunter', remove_hunter)
     capture_reward = options.get('capture_reward', capture_reward)
+    n = options.get('n', n)
+    k = options.get('k', k)
+    m = options.get('m', m)
+    num_agents = k
 
 ## Functions to convert action representations ##
 
@@ -169,55 +148,27 @@ def action_indices_to_coordinates(a_indices):
     coords = [agent_action_space[i] for i in a_indices]
     return np.concatenate(coords)
 
-# def action_coordinates_to_index(coords):
-#     '''Converts an agent's action coordinates to an index 0 to 8.'''
-#     assert -1 <= coords[0] <= 1 and -1 <= coords[1] <= 1
-#     matches = [np.array_equal(coords, c) for c in agent_action_space]
-#     return matches.index(True)
+def opposite_direction(s, a, i):
+    '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid
+       the closest hunter (after hunters take action a).
+    '''
+    raise NotImplementedError('TODO: allow rabbits to move in opposite direction')
 
-## Functions to convert state representations ##
+    # # Calculate hunter positions after a
+    # hunter_s = np.array(s[:2*k])
+    # for j in range(2*k):
+    #     if hunter_s[j] == -1:
+    #         continue
+    #     elif 0 <= hunter_s[j] + a[j] < n:
+    #         hunter_s[j] += a[j]
 
-# state_index_to_coords = [np.array((col, row)) for col in range(n)
-#                                               for row in range(n)] + \
-#                         [np.array((-1, -1))]
+    # # Find position of closest hunter
+    # rabbit = s[i:i+2]
+    # distance = float('inf')
+    # for j in range(0, 2*k, 2):
+    #     d = np.linalg.norm(rabbit - s[j:j+2])
+    #     if d < distance:
+    #         closest_hunter = s[j:j+2]
 
-# def state_index_to_coordinates(index):
-#     '''Converts a state index 0 to (n*n-1) to an agent's state coordinates.'''
-#     assert 0 <= index < n*n
-#     return state_index_to_coords[index]
-
-# def state_coordinates_to_index(coords):
-#     '''Converts an agent's state coordinates to an index 0 to (n*n-1).'''
-#     assert -1 <= coords[0] < n and -1 <= coords[1] < n
-#     matches = [np.array_equal(coords, c) for c in state_index_to_coords]
-#     return matches.index(True)
-
-# def state_coordinates_to_kmhot(state):
-#     '''Converts a coordinate state vector to a (k+m)-hot state vector.'''
-#     onehots = []
-#     for i in range(k+m):
-#         s = state[2*i:2*i+2]
-#         if np.array_equal(s, np.array([-1, -1])):
-#             # All zero vector corresponds to [-1, -1]
-#             onehots.append(np.zeros(n*n))
-#         else:
-#             index = state_coordinates_to_index(s)
-#             onehot = np.zeros(n*n)
-#             onehot[index] = 1
-#             onehots.append(onehot)
-#     return np.concatenate(onehots)
-
-# def state_kmhot_to_coordinates(kmhot):
-#     '''Converts a (k+m)-hot state vector to a coordinate state vector.'''
-#     coords = []
-#     for i in range(k+m):
-#         onehot = kmhot[i*(n*n):(i+1)*(n*n)]
-#         where = np.where(onehot == 1)
-#         if len(where[0]) == 0:
-#             # All zero vector corresponds to [-1, -1]
-#             coords.append(np.array([-1, -1]))
-#         else:
-#             index = where[0][0]
-#             state = state_index_to_coordinates(index)
-#             coords.append(state)
-#     return np.concatenate(coords)
+    # # Calculate opposite direction
+    # return np.sign(rabbit - closest_hunter)
