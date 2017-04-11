@@ -16,6 +16,7 @@ import os
 import random
 import sys
 import torch
+import itertools
 
 from namedlist import namedlist
 from torch.autograd import Variable
@@ -189,8 +190,6 @@ def run_policy_net(policy_net, state):
     softmax = torch.nn.Softmax()
     
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
-    if cuda:
-        x_n.cuda()
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
@@ -242,6 +241,33 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
     # Pre-compute baselines, if being used
     if val_baseline is not None:
         values = [run_value_net(val_baseline, step.s) for step in episode]
+
+    a_indices = []
+    a_n = np.zeros(a_size)
+    h_n_batch = Variable(ZeroTensor(len(episode), h_size))
+    c_n_batch = Variable(ZeroTensor(len(episode), h_size))
+    policy_net.zero_grad()
+    softmax = torch.nn.Softmax()
+
+    input_batch = ZeroTensor(game.num_agents,
+        len(episode), a_size + len(state))
+    
+    for i in range(num_agents):
+        for j, step in enumerate(episode):
+            input_batch[i, j, a_size:].copy_(step.s)
+            if i > 0:
+                input_batch[i, j, step.a[i-1]] = 1
+    input_batch = Variable(input_batch)
+
+    x_n_batch = input_batch[0, :, :]
+    for i in range(num_agents):
+        o_nn, h_n_batch, c_n_batch = policy_net(x_n, h_n, c_n)
+
+        
+        
+
+
+
 
     # Accumulate the update terms for each step in the episode into W_step
     """
