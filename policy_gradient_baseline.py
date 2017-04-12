@@ -32,8 +32,8 @@ def run_episode(policy_net, gamma=1.0):
        which is a MLP that maps states to joint action probabilities.
 
        Parameters:
-           policy_net is our MLP policy network
-           gamma is the discount factor for calculating returns
+           policy_net: MLP policy network
+           gamma: discount factor for calculating returns
 
        Returns:
            [EpisodeStep(t=0), ..., EpisodeStep(t=T)]
@@ -74,6 +74,8 @@ def build_value_net(layers):
                   torch.nn.Linear(layers[0], layers[1]),
                   torch.nn.Tanh(),
                   torch.nn.Linear(layers[1], layers[2]))
+    value_net.layers = layers
+
     return value_net.cuda() if cuda else value_net
 
 def train_value_net(value_net, episode, td=None, gamma=1.0):
@@ -157,6 +159,7 @@ def run_policy_net(policy_net, state):
        train_policy_net().
     '''
     # Prepare for forward and backward pass
+    a_size = policy_net.layers[2]
     a = [0] * a_size
     policy_net.zero_grad()
     softmax = torch.nn.Softmax()
@@ -184,30 +187,31 @@ def run_policy_net(policy_net, state):
     return a, grad_W
 
 def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
-                     lr=3*1e-3, opt='rmsprop', gc=False):
+                     lr=3*1e-3):
     '''Update the policy network parameters with the REINFORCE algorithm.
        For each parameter W of the policy network, for each time-step t in the
        episode, make the update:
          W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
             = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
+
        (Notes: The sum is over the number of agents, each with an associated p
                The grad_W(sum(log_p)) are pre-computed in each EpisodeStep)
+
        Parameters:
-       policy_net is our LSTM policy network
-       episode is an list of EpisodeStep's
-       val_baseline is a value network used as the baseline term
-       td is the k for a TD(k) estimate of G_t (requires val_baseline),
-         td=None for a Monte-Carlo G_t
-       gamma is the discount term used for a TD(k) gradient term
-       opt is the optimizer to use, either 'rmsprop' or 'rprop'
+           policy_net: LSTM policy network
+           episode: list of EpisodeStep's
+           val_baseline: value network used as the baseline term
+           td: k for a TD(k) estimate of G_t (requires val_baseline),
+               td=None for a Monte-Carlo G_t
+           gamma: the discount term used for a TD(k) gradient term
     '''
     # Pre-compute baselines, if being used
     if val_baseline is not None:
         values = [run_value_net(val_baseline, step.s) for step in episode]
 
     # Accumulate the update terms for each step in the episode into W_step
-    for W in W_step: W.zero_()
+    W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
     for t, step in enumerate(episode):
         s_t, G_t, grad_W = step.s, step.G, step.grad_W
         for i in range(len(W_step)):
@@ -228,35 +232,17 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
                 W_step[i] += grad_W[i] * G_t
 
     # Gradient clipping
-    if gc:
-        for i in range(len(W_step)):
-            W_step[i].clamp_(-1,1)
+    for i in range(len(W_step)):
+        W_step[i].clamp_(-1, 1)
 
-    if opt == 'rprop':  # Do a step of rprop
-        for i, W in enumerate(policy_net.parameters()):
-            W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
-    elif opt == 'rmsprop':  # Do a step of RMSprop
-        eps = 1e-5  # For numerical stability
-        alpha = 0.9  # Weighted average factor
-        for i in range(len(W_step)):
-            mean_square[i] = alpha*mean_square[i] + (1-alpha)*W_step[i].pow(2)
-            W_step[i] = lr * W_step[i] / (mean_square[i] + eps).sqrt()
-        for i, W in enumerate(policy_net.parameters()):
-            W.data += W_step[i]
-
-def set_options(options):
-    '''Sets policy gradient options.'''
-    global cuda, max_episode_len, max_len_penalty, FloatTensor, ZeroTensor, ByteTensor
-    cuda = options.cuda
-    max_episode_len = options.max_episode_len
-    max_len_penalty = options.max_len_penalty
-    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
-    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
-    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
-
-    # Transparently set number of threads based on environment variables
-    num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
-    torch.set_num_threads(num_threads)
+    # Do a step of RMSProp
+    eps = 1e-5  # For numerical stability
+    alpha = 0.9  # Weighted average factor
+    for i in range(len(W_step)):
+        mean_square[i] = alpha*mean_square[i] + (1-alpha)*W_step[i].pow(2)
+        W_step[i] = lr * W_step[i] / (mean_square[i] + eps).sqrt()
+    for i, W in enumerate(policy_net.parameters()):
+        W.data += W_step[i]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
@@ -266,18 +252,31 @@ if __name__ == '__main__':
     parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
     parser.add_argument('--num_episodes', default=100000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
-    parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
-    parser.add_argument('--nogc', default=False, action='store_true', help='Include to disable gradient clipping')
     args = parser.parse_args()
-    set_options(args)
+    print(args)
+
+    # Sets options for PG
+    cuda = args.cuda
+    max_episode_len = args.max_episode_len
+    max_len_penalty = args.max_len_penalty
+    if cuda: print('Running policy gradient on GPU.')
+
+    # Transparently set number of threads based on environment variables
+    num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
+    torch.set_num_threads(num_threads)
+
+    # Define wrappers for Tensors
+    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
+    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
+    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
 
     if args.game == 'gridworld':
         import gridworld as game
         policy_net_layers = [2, 32, 9]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 12, 'grid_x': 12})
+        game.set_options({'grid_y': 4, 'grid_x': 4})
     if args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [3, 64, 27]
@@ -289,12 +288,7 @@ if __name__ == '__main__':
         value_net = build_value_net(value_net_layers)
         optimizer_value_net = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
-        # Init main Tensors first, so we don't have to allocate memory at runtime
-        # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
-        #   Used in run_policy_net():
-        a_size = policy_net_layers[2]
-        #   Used in train_policy_net():
-        W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
+        # RMSProp variables for policy net
         mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
         for W in mean_square: W += 1
 
@@ -305,5 +299,5 @@ if __name__ == '__main__':
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt, gc=not args.nogc)
+            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
 

@@ -129,6 +129,7 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
 
     return loss.data[0]
 
+# TODO: look at where this is run
 def run_value_net(value_net, state):
     '''Wrapper function to feed one state into the given value network and
        return the value as a scalar.'''
@@ -217,6 +218,8 @@ def run_policy_net(policy_net, state):
 
     return a_indices
 
+# TODO: require val_baseline?
+# TODO: remove TD?
 def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
