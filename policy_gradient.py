@@ -23,7 +23,6 @@ from torch.autograd import Variable
 
 # Define a EpisodeStep container for each step in an episode:
 #   s, a is the state-action pair visited during that step
-#   grad_W is gradient term sum(grad_W(log(p))); see train_policy_net()
 #   r is the reward received from that state-action pair
 #   G is the discounted return received from that state-action pair
 EpisodeStep = namedlist('EpisodeStep', 's a r G', default=0)
@@ -33,11 +32,11 @@ def run_episode(policy_net, gamma=1.0):
        which is a LSTM that maps states to action probabilities.
 
        Parameters:
-       policy_net is our LSTM policy network
-       gamma is the discount factor for calculating returns
+           policy_net: LSTM policy network
+           gamma: discount factor for calculating returns
 
        Returns:
-       [EpisodeStep(t=0), ..., EpisodeStep(t=T)]
+           [EpisodeStep(t=0), ..., EpisodeStep(t=T)]
     '''
     # Initialize state as player position
     state = game.start_state()
@@ -85,13 +84,13 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
        Warning: currently only works for integer-vector states!
 
        Parameters:
-       value_net is the value network to be trained
-       episode is a list of EpisodeStep's
-       td is the k for a TD(k) return, td=None for a Monte-Carlo return
-       gamma is the discount term used for TD(k) returns
+           value_net: value network to be trained
+           episode: list of EpisodeStep's
+           td: k for a TD(k) return, td=None for a Monte-Carlo return
+           gamma: discount term used for TD(k) returns
 
        Returns:
-       The scalar loss of the newly trained value network.
+           The scalar loss of the newly trained value network.
     '''
     # Pre-compute values, if being used
     if td is not None:
@@ -121,14 +120,12 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
     states = Variable(FloatTensor(states))
     returns = Variable(FloatTensor(returns))
 
-    # Define loss function and optimizer
-    loss_fn = torch.nn.L1Loss()
-
     # Train the value network on states, returns
-    optimizer_valuenet.zero_grad()
+    optimizer_value_net.zero_grad()
+    loss_fn = torch.nn.L1Loss()
     loss = loss_fn(value_net(states), returns)
     loss.backward()
-    optimizer_valuenet.step()
+    optimizer_value_net.step()
 
     return loss.data[0]
 
@@ -163,20 +160,17 @@ def build_policy_net(layers):
     return policy_net.cuda() if cuda else policy_net
 
 def masked_softmax(logits, mask):
-    """ 
+    """
     Parameters:
-        logits: should be a batch_size x d Variable
-        mask: a batch_size x d float tensor
+        logits: Variable of size [batch_size, d]
+        mask: FloatTensor of size [batch_size, d]
 
     Returns:
-        probs: the rowise masked softmax of the logits
+        probs: row-wise masked softmax of the logits
     """
-
     scores = torch.exp(logits) * Variable(mask)
     partitions = torch.sum(scores, 1)
-
     probs = scores / partitions.expand_as(scores)
-
     return probs
 
 def run_policy_net(policy_net, state):
@@ -188,32 +182,30 @@ def run_policy_net(policy_net, state):
        As such, the input to the LSTM at time-step n is concat(a_{n-1}, state).
        We return a list of action indices, one index per agent.
 
-       For each parameter W, the gradient term `grad_W(sum(log(p)))` is also
-       computed and returned. This is used in the REINFORCE algorithm; see
-       train_policy_net().
-
        Parameters:
-           policy_net: the LSTM that given (x_n, h_n, c_n) returns o_nn, h_nn, c_nn
+           policy_net: LSTM that given (x_n, h_n, c_n) returns o_nn, h_nn, c_nn
            state: state of the MDP
+
+       Returns:
+           a_indices: list of action indices of each agent
     '''
-    # TODO(Martin): What should h_0, c_0 be?
     # Prepare initial inputs for policy_net
     a_indices = []
+    h_size, a_size = policy_net.layers[1], policy_net.layers[2]
     a_n = np.zeros(a_size)
     h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
-    policy_net.zero_grad()
-    
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
+    policy_net.zero_grad()
+
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
         x_n.data.copy_(torch.Tensor([np.append(a_n, state)]))
         o_n, h_n, c_n = policy_net(x_n, h_n, c_n)
-        
+
         # Select action over possible ones
         action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
         dist = masked_softmax(o_n, action_mask)
-
         a_index = np.random.choice(range(a_size), p=dist[0].data.cpu().numpy())
 
         # Record action for this iteration/agent
@@ -225,78 +217,74 @@ def run_policy_net(policy_net, state):
 
     return a_indices
 
-def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
-                     lr=3*1e-3, opt='rmsprop', gc=False):
+def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
-       For each parameter W of the policy network, for each time-step t in the
-       episode, make the update:
+       That is, for each parameter W of the policy network, for each time-step
+       t in the episode, make the update:
          W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
             = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
 
-       (Notes: The sum is over the number of agents, each with an associated p
-               The grad_W(sum(log_p)) are pre-computed in each EpisodeStep)
+       (Notes: The sum is over the number of agents, each with an associated p)
 
        Parameters:
-       policy_net is our LSTM policy network
-       episode is an list of EpisodeStep's
-       val_baseline is a value network used as the baseline term
-       td is the k for a TD(k) estimate of G_t (requires val_baseline),
-         td=None for a Monte-Carlo G_t
-       gamma is the discount term used for a TD(k) gradient term
-       opt is the optimizer to use, either 'rmsprop' or 'rprop'
+           policy_net: LSTM policy network
+           episode: list of EpisodeStep's
+           val_baseline: value network used as the baseline term
+           td: k for a TD(k) estimate of G_t (requires val_baseline),
+               td=None for a Monte-Carlo G_t
+           gamma: discount term used for a TD(k) gradient term
     '''
     # Pre-compute baselines, if being used
     if val_baseline is not None:
         values = [run_value_net(val_baseline, step.s) for step in episode]
 
+    # Prepare for one forward pass, with the batch containing the entire episode
     a_indices = []
+    h_size, a_size = policy_net.layers[1], policy_net.layers[2]
     a_n = np.zeros(a_size)
     h_n_batch = Variable(ZeroTensor(len(episode), h_size))
     c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
 
-    input_batch = ZeroTensor(game.num_agents,
-        len(episode), a_size + len(episode[0].s))
-    
+    # Input to LSTM has size [num_agents, episode_len, each_input_size]
+    input_batch = ZeroTensor(game.num_agents, len(episode),
+                             a_size + len(episode[0].s))
+
+    # Fill input_batch with concat(a_{n-1}, state) for each agent, for each time-step
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
             input_batch[i, j, a_size:].copy_(torch.Tensor(step.s))
-            if i > 0:
-                input_batch[i, j, step.a[i-1]] = 1
+            if i > 0: input_batch[i, j, step.a[i-1]] = 1
     input_batch = Variable(input_batch)
-    
+
+    # Fill action_mask_batch with action masks for each state
     action_mask_batch = ZeroTensor(game.num_agents, len(episode), a_size)
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
             action_mask_batch[i,j,:].copy_(torch.Tensor(game.filter_actions(step.s, i)))
 
-    logprobs = Variable(ZeroTensor(len(episode)))
+    # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
+    sum_log_probs = Variable(ZeroTensor(len(episode)))
     for i in range(game.num_agents):
         o_n, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n_batch, c_n_batch)
-        
         dist = masked_softmax(o_n, action_mask_batch[i])
- 
         for j, step in enumerate(episode):
-            logprobs[j] = logprobs[j] + torch.log(dist[j, step.a[i]])
+            sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
+    # Do a backward pass to compute the policy gradient term
     values = Variable(FloatTensor(np.asarray(values)))
     returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
-    
-    neg_performance = (logprobs * (values - returns)).sum()
+    neg_performance = (sum_log_probs * (values - returns)).sum()
+    neg_performance.backward()
 
-    neg_performance.backward()  
-    
-    if gc:
-        for W in policy_net.parameters():
-            W.grad.data.clamp_(-1,1)
+    # Clip gradients to [-1, 1]
+    for W in policy_net.parameters():
+        W.grad.data.clamp_(-1,1)
 
-    optimizer_policynet.step()
-
-
-    # Gradient clipping
-
+    # Do a step of RMSProp
+    optimizer_policy_net.step()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
@@ -306,13 +294,11 @@ if __name__ == '__main__':
     parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
     parser.add_argument('--num_episodes', default=100000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
-    parser.add_argument('--policy_net_opt', default='rmsprop', choices=['rmsprop', 'rprop'], help='Optimizer for training the policy net')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
-    parser.add_argument('--nogc', default=False, action='store_true', help='Include to disable gradient clipping')
     args = parser.parse_args()
-    
-    print args
+    print(args)
+
     # Sets options for PG
     cuda = args.cuda
     max_episode_len = args.max_episode_len
@@ -322,6 +308,11 @@ if __name__ == '__main__':
     # Transparently set number of threads based on environment variables
     num_threads = int(os.getenv('OMP_NUM_THREADS', 1))
     torch.set_num_threads(num_threads)
+
+    # Define wrappers for Tensors
+    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
+    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
+    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
 
     if args.game == 'gridworld':
         import gridworld as game
@@ -339,33 +330,23 @@ if __name__ == '__main__':
         value_net_layers = [8, 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
                           'capture_reward': 10})
-    FloatTensor = lambda x: torch.cuda.FloatTensor(x) if cuda else torch.FloatTensor(x)
-    ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
-    ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
-        optimizer_valuenet = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
-        optimizer_policynet = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
-
-        # Init main Tensors first, so we don't have to allocate memory at runtime
-        # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
-        #   Used in run_policy_net():
-        h_size, a_size = policy_net_layers[1], policy_net_layers[2]
-        x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
-        #   Used in train_policy_net():
+        optimizer_value_net = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
+        optimizer_policy_net = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
-            t = time.time()
+            # t = time.time()
             episode = run_episode(policy_net, gamma=args.gamma)
-            time_episode = time.time() - t
+            # time_episode = time.time() - t
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error)) 
-            print time_episode
-            t = time.time()
-            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt, gc=not args.nogc)
-            print time.time() - t
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
+            # print time_episode
+            # t = time.time()
+            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
+            # print time.time() - t
