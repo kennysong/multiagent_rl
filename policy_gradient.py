@@ -16,7 +16,7 @@ import os
 import random
 import sys
 import torch
-import itertools
+import time
 
 from namedlist import namedlist
 from torch.autograd import Variable
@@ -124,12 +124,11 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
     # Define loss function and optimizer
     loss_fn = torch.nn.L1Loss()
 
-    # TODO(Martin): Clip gradients here?
     # Train the value network on states, returns
-    optimizer_value.zero_grad()
+    optimizer_valuenet.zero_grad()
     loss = loss_fn(value_net(states), returns)
     loss.backward()
-    optimizer_value.step()
+    optimizer_valuenet.step()
 
     return loss.data[0]
 
@@ -163,6 +162,23 @@ def build_policy_net(layers):
     policy_net = PolicyNet(layers)
     return policy_net.cuda() if cuda else policy_net
 
+def masked_softmax(logits, mask):
+    """ 
+    Parameters:
+        logits: should be a batch_size x d Variable
+        mask: a batch_size x d float tensor
+
+    Returns:
+        probs: the rowise masked softmax of the logits
+    """
+
+    scores = torch.exp(logits) * Variable(mask)
+    partitions = torch.sum(scores, 1)
+
+    probs = scores / partitions.expand_as(scores)
+
+    return probs
+
 def run_policy_net(policy_net, state):
     '''Wrapper function to feed a given state into the given policy network and
        return an action vector, as well as parameter gradients.
@@ -186,7 +202,6 @@ def run_policy_net(policy_net, state):
     a_n = np.zeros(a_size)
     h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     policy_net.zero_grad()
-    softmax = torch.nn.Softmax()
     
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
     # Use policy_net to predict output for each agent
@@ -194,6 +209,8 @@ def run_policy_net(policy_net, state):
         # Do a forward step through policy_net, filter actions, and softmax it
         x_n.data.copy_(torch.Tensor([np.append(a_n, state)]))
         o_nn, h_n, c_n = policy_net(x_n, h_n, c_n)
+        
+        """
         action_mask = ByteTensor(game.filter_actions(state, n))
         filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
         dist = softmax(filt_o_nn)
@@ -201,9 +218,13 @@ def run_policy_net(policy_net, state):
         # Sample an available action from dist
         filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
         a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
+        """
 
-        # Calculate sum(log(p + eps)); eps for numerical stability
-        filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
+        # Equivalent code
+        action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
+        dist = masked_softmax(o_nn, action_mask)
+
+        a_index = np.random.choice(range(a_size), p=dist[0].data.cpu().numpy())
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
@@ -245,78 +266,47 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
     h_n_batch = Variable(ZeroTensor(len(episode), h_size))
     c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
-    softmax = torch.nn.Softmax()
 
     input_batch = ZeroTensor(game.num_agents,
-        len(episode), a_size + len(state))
+        len(episode), a_size + len(episode[0].s))
     
-    for i in range(num_agents):
+    for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            input_batch[i, j, a_size:].copy_(step.s)
+            input_batch[i, j, a_size:].copy_(torch.Tensor(step.s))
             if i > 0:
                 input_batch[i, j, step.a[i-1]] = 1
     input_batch = Variable(input_batch)
-
     
-    logprobs = Varible(ZeroTensor(len(episode)))
-    for i in range(num_agents):
-        o_nn, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n, c_n)
-        dist = softmax(o_nn) # This is episode x action
-        
+    action_mask_batch = ZeroTensor(game.num_agents, len(episode), a_size)
+    for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            logprobs[j] += torch.log(dist[j, step.a[i]])
+            action_mask_batch[i,j,:].copy_(torch.Tensor(game.filter_actions(step.s, i)))
 
-    values = torch.Tensor(np.asarray(values))
-    returns = ...
-    performance = (logprobs * (values - returns)).sum()
-
-    performance.backward()  
+    logprobs = Variable(ZeroTensor(len(episode)))
+    for i in range(game.num_agents):
+        o_nn, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n_batch, c_n_batch)
         
+        dist = masked_softmax(o_nn, action_mask_batch[i])
+ 
+        for j, step in enumerate(episode):
+            logprobs[j] = logprobs[j] + torch.log(dist[j, step.a[i]])
 
+    values = Variable(FloatTensor(np.asarray(values)))
+    returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
+    
+    neg_performance = (logprobs * (values - returns)).sum()
 
+    neg_performance.backward()  
+    
+    if gc:
+        for W in policy_net.parameters():
+            W.grad.data.clamp_(-1,1)
 
+    optimizer_policynet.step()
 
-    # Accumulate the update terms for each step in the episode into W_step
-    """
-    for W in W_step: W.zero_()
-    for t, step in enumerate(episode):
-        s_t, G_t, grad_W = step.s, step.G, step.grad_W
-        for i in range(len(W_step)):
-            # Monte-Carlo baselined update
-            if val_baseline and td is None:
-                W_step[i] += grad_W[i] * (G_t - values[t])
-            # TD baselined update
-            elif val_baseline and td >= 0:
-                t_end = t + td + 1  # TD requires we look forward until t_end
-                if t_end < len(episode):
-                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, t_end)])
-                    W_step[i] += grad_W[i] * (r + values[t_end] - values[t])
-                else:
-                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, len(episode))])
-                    W_step[i] += grad_W[i] * (r - values[t])
-            # Monte-Carlo update without baseline
-            else:
-                W_step[i] += grad_W[i] * G_t
-    """
-
-    # Compute logprobs for 
 
     # Gradient clipping
-    if gc:
-        for i in range(len(W_step)):
-            W_step[i].clamp_(-1,1)
 
-    if opt == 'rprop':  # Do a step of rprop
-        for i, W in enumerate(policy_net.parameters()):
-            W.data += lr * W_step[i] / (W_step[i].abs() + 1e-5)
-    elif opt == 'rmsprop':  # Do a step of RMSprop
-        eps = 1e-5  # For numerical stability
-        alpha = 0.9  # Weighted average factor
-        for i in range(len(W_step)):
-            mean_square[i] = alpha*mean_square[i] + (1-alpha)*W_step[i].pow(2)
-            W_step[i] = lr * W_step[i] / (mean_square[i] + eps).sqrt()
-        for i, W in enumerate(policy_net.parameters()):
-            W.data += W_step[i]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
@@ -332,10 +322,11 @@ if __name__ == '__main__':
     parser.add_argument('--gc', default=False, action='store_true', help='Include to use gradient clipping')
     args = parser.parse_args()
     
+    print args
     # Sets options for PG
-    cuda = options.cuda
-    max_episode_len = options.max_episode_len
-    max_len_penalty = options.max_len_penalty
+    cuda = args.cuda
+    max_episode_len = args.max_episode_len
+    max_len_penalty = args.max_len_penalty
     if cuda: print('Running policy gradient on GPU.')
 
     # Transparently set number of threads based on environment variables
@@ -351,7 +342,7 @@ if __name__ == '__main__':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
         value_net_layers = [3, 32, 1]
-        game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         import hunters as game
         policy_net_layers = [17, 128, 9]
@@ -365,7 +356,8 @@ if __name__ == '__main__':
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
-        optimizer_value = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
+        optimizer_valuenet = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
+        optimizer_policynet = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
 
         # Init main Tensors first, so we don't have to allocate memory at runtime
         # TODO: Check again after https://github.com/pytorch/pytorch/issues/339
@@ -373,14 +365,17 @@ if __name__ == '__main__':
         h_size, a_size = policy_net_layers[1], policy_net_layers[2]
         x_n = Variable(ZeroTensor(1, policy_net_layers[0]))
         #   Used in train_policy_net():
-        mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
-        for W in mean_square: W += 1
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
+            t = time.time()
             episode = run_episode(policy_net, gamma=args.gamma)
+            time_episode = time.time() - t
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error)) 
+            print time_episode
+            t = time.time()
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma, opt=args.policy_net_opt, gc=args.gc)
+            print time.time() - t
