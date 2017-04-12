@@ -208,21 +208,11 @@ def run_policy_net(policy_net, state):
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
         x_n.data.copy_(torch.Tensor([np.append(a_n, state)]))
-        o_nn, h_n, c_n = policy_net(x_n, h_n, c_n)
+        o_n, h_n, c_n = policy_net(x_n, h_n, c_n)
         
-        """
-        action_mask = ByteTensor(game.filter_actions(state, n))
-        filt_o_nn = o_nn[action_mask].resize(1, action_mask.sum())
-        dist = softmax(filt_o_nn)
-
-        # Sample an available action from dist
-        filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
-        a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
-        """
-
-        # Equivalent code
+        # Select action over possible ones
         action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
-        dist = masked_softmax(o_nn, action_mask)
+        dist = masked_softmax(o_n, action_mask)
 
         a_index = np.random.choice(range(a_size), p=dist[0].data.cpu().numpy())
 
@@ -284,9 +274,9 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
 
     logprobs = Variable(ZeroTensor(len(episode)))
     for i in range(game.num_agents):
-        o_nn, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n_batch, c_n_batch)
+        o_n, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n_batch, c_n_batch)
         
-        dist = masked_softmax(o_nn, action_mask_batch[i])
+        dist = masked_softmax(o_n, action_mask_batch[i])
  
         for j, step in enumerate(episode):
             logprobs[j] = logprobs[j] + torch.log(dist[j, step.a[i]])
