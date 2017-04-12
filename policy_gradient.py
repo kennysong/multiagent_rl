@@ -129,7 +129,6 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
 
     return loss.data[0]
 
-# TODO: look at where this is run
 def run_value_net(value_net, state):
     '''Wrapper function to feed one state into the given value network and
        return the value as a scalar.'''
@@ -218,9 +217,7 @@ def run_policy_net(policy_net, state):
 
     return a_indices
 
-# TODO: require val_baseline?
-# TODO: remove TD?
-def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0):
+def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        That is, for each parameter W of the policy network, for each time-step
@@ -239,9 +236,12 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0)
                td=None for a Monte-Carlo G_t
            gamma: discount term used for a TD(k) gradient term
     '''
-    # Pre-compute baselines, if being used
-    if val_baseline is not None:
-        values = [run_value_net(val_baseline, step.s) for step in episode]
+    # Warning
+    if td is not None:
+        raise NotImplementedError('TD is not implemented for train_policy_net()')
+
+    # Pre-compute baselines
+    values = [run_value_net(val_baseline, step.s) for step in episode]
 
     # Prepare for one forward pass, with the batch containing the entire episode
     a_indices = []
