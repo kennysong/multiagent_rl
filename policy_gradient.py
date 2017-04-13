@@ -51,7 +51,7 @@ def run_episode(policy_net, gamma=1.0):
         # Take that action, then the game gives us the next state and reward
         next_s, r = game.perform_action(state, a_indices)
 
-        # Record state, action, grad_W, reward
+        # Record state, action, reward
         episode.append(EpisodeStep(s=state, a=a_indices, r=r))
         state = next_s
 
@@ -207,7 +207,7 @@ def run_policy_net(policy_net, state):
         # Select action over possible ones
         action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
         dist = masked_softmax(o_n, action_mask)
-        a_index = np.random.choice(range(a_size), p=dist[0].data.cpu().numpy())
+        a_index = torch.multinomial(dist.data,1)[0,0]
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
