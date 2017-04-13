@@ -26,6 +26,7 @@ from torch.autograd import Variable
 #   r is the reward received from that state-action pair
 #   G is the discounted return received from that state-action pair
 EpisodeStep = namedlist('EpisodeStep', 's a r G', default=0)
+SMALL = 1e-7
 
 def run_episode(policy_net, gamma=1.0):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
@@ -72,7 +73,7 @@ def build_value_net(layers):
     '''
     value_net = torch.nn.Sequential(
                   torch.nn.Linear(layers[0], layers[1]),
-                  torch.nn.Tanh(),
+                  torch.nn.ReLU(),
                   torch.nn.Linear(layers[1], layers[2]))
     return value_net.cuda() if cuda else value_net
 
@@ -217,7 +218,7 @@ def run_policy_net(policy_net, state):
 
     return a_indices
 
-def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0):
+def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entropy_weight = 0.0):
     '''Update the policy network parameters with the REINFORCE algorithm.
 
        That is, for each parameter W of the policy network, for each time-step
@@ -270,16 +271,18 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0):
 
     # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
     sum_log_probs = Variable(ZeroTensor(len(episode)))
+    entropy_estimate = Variable(ZeroTensor(1))
     for i in range(game.num_agents):
         o_n, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n_batch, c_n_batch)
         dist = masked_softmax(o_n, action_mask_batch[i])
+        entropy_estimate += (- dist * torch.log(dist + SMALL)).sum()
         for j, step in enumerate(episode):
             sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
     # Do a backward pass to compute the policy gradient term
     values = Variable(FloatTensor(np.asarray(values)))
     returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
-    neg_performance = (sum_log_probs * (values - returns)).sum()
+    neg_performance = (sum_log_probs * (values - returns)).sum() - entropy_weight * entropy_estimate
     neg_performance.backward()
 
     # Clip gradients to [-1, 1]
@@ -342,14 +345,14 @@ if __name__ == '__main__':
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
-            # t = time.time()
+            #t = time.time()
             episode = run_episode(policy_net, gamma=args.gamma)
-            # time_episode = time.time() - t
+            #time_episode = time.time() - t
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            # print time_episode
-            # t = time.time()
+            #print time_episode
+            #t = time.time()
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
-            # print time.time() - t
+            #print time.time() - t
