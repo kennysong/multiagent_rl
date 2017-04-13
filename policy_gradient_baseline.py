@@ -28,7 +28,7 @@ from torch.autograd import Variable
 EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
 
 def run_episode(policy_net, gamma=1.0):
-    '''Runs one episode of Gridworld Cliff to completion with a policy network,
+    '''Runs one episode of a game to completion with a policy network,
        which is a MLP that maps states to joint action probabilities.
 
        Parameters:

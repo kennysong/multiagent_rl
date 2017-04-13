@@ -1,6 +1,6 @@
 '''
-    This is a multi-agent policy gradient implementation (REINFORCE with
-    baselines) for any game that conforms to the interface:
+    This is a multi-agent SARSA implementation for any game that conforms to
+    the interface:
 
       game.num_agents - number of agents
       game.start_state() - returns start state of the game
@@ -66,75 +66,6 @@ def run_episode(policy_net, gamma=1.0):
         else: step.G = step.r + gamma*episode[len(episode)-i].G
 
     return episode
-
-def build_value_net(layers):
-    '''Builds an MLP value function approximator, which maps states to scalar
-       values. It has one hidden layer with tanh activations.
-    '''
-    value_net = torch.nn.Sequential(
-                  torch.nn.Linear(layers[0], layers[1]),
-                  torch.nn.ReLU(),
-                  torch.nn.Linear(layers[1], layers[2]))
-    return value_net.cuda() if cuda else value_net
-
-def train_value_net(value_net, episode, td=None, gamma=1.0):
-    '''Trains an MLP value function approximator based on the output of one
-       episode, i.e. first-visit Monte-Carlo policy evaluation. The value
-       network will map states to scalar values.
-
-       Warning: currently only works for integer-vector states!
-
-       Parameters:
-           value_net: value network to be trained
-           episode: list of EpisodeStep's
-           td: k for a TD(k) return, td=None for a Monte-Carlo return
-           gamma: discount term used for TD(k) returns
-
-       Returns:
-           The scalar loss of the newly trained value network.
-    '''
-    # Pre-compute values, if being used
-    if td is not None:
-        values = [run_value_net(value_net, step.s) for step in episode]
-
-    # Calculate return from the first visit to each state
-    visited_states = set()
-    states, returns = [], []
-    for t in range(len(episode)):
-        s, G = episode[t].s, episode[t].G
-        str_s = s.astype(int).tostring()  # Fastest hashable state representation
-        if str_s not in visited_states:
-            visited_states.add(str_s)
-            states.append(s)
-
-            # Monte-Carlo return
-            if td is None:
-                returns.append(G)
-            # TD return
-            elif td >= 0:
-                t_end = t + td + 1  # TD requires we look forward until t_end
-                if t_end < len(episode):
-                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, t_end)]) + values[t_end]
-                else:
-                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, len(episode))])
-                returns.append(r)
-    states = Variable(FloatTensor(states))
-    returns = Variable(FloatTensor(returns))
-
-    # Train the value network on states, returns
-    optimizer_value_net.zero_grad()
-    loss_fn = torch.nn.L1Loss()
-    loss = loss_fn(value_net(states), returns)
-    loss.backward()
-    optimizer_value_net.step()
-
-    return loss.data[0]
-
-def run_value_net(value_net, state):
-    '''Wrapper function to feed one state into the given value network and
-       return the value as a scalar.'''
-    result = value_net(Variable(FloatTensor([state])))
-    return result.data[0][0]
 
 def build_policy_net(layers):
     '''Builds an LSTM policy network, which maps states to action vectors.
@@ -218,32 +149,18 @@ def run_policy_net(policy_net, state):
 
     return a_indices
 
-def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entropy_weight = 0.0):
-    '''Update the policy network parameters with the REINFORCE algorithm.
+def train_policy_net(policy_net, episode, gamma=1.0):
+    '''Update the policy network parameters with a SARSA update.
 
-       That is, for each parameter W of the policy network, for each time-step
-       t in the episode, make the update:
-         W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
-            = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
-       for all time steps in the episode.
-
-       (Notes: The sum is over the number of agents, each with an associated p)
+       That is, we want the policy net to minimize the squared error:
+         (r + gamma*Q(s', a') - Q(s, a))^2
+       So, update the parameters using the gradient of the error.
 
        Parameters:
            policy_net: LSTM policy network
            episode: list of EpisodeStep's
-           val_baseline: value network used as the baseline term
-           td: k for a TD(k) estimate of G_t (requires val_baseline),
-               td=None for a Monte-Carlo G_t
-           gamma: discount term used for a TD(k) gradient term
+           gamma: discount term
     '''
-    # Warning
-    if td is not None:
-        raise NotImplementedError('TD is not implemented for train_policy_net()')
-
-    # Pre-compute baselines
-    values = [run_value_net(val_baseline, step.s) for step in episode]
-
     # Prepare for one forward pass, with the batch containing the entire episode
     a_indices = []
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
@@ -271,19 +188,17 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
 
     # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
     sum_log_probs = Variable(ZeroTensor(len(episode)))
-    entropy_estimate = Variable(ZeroTensor(1))
     for i in range(game.num_agents):
         o_n, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n_batch, c_n_batch)
         dist = masked_softmax(o_n, action_mask_batch[i])
-        entropy_estimate += (- dist * torch.log(dist + SMALL)).sum()
         for j, step in enumerate(episode):
             sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
     # Do a backward pass to compute the policy gradient term
-    values = Variable(FloatTensor(np.asarray(values)))
-    returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
-    neg_performance = (sum_log_probs * (values - returns)).sum() - entropy_weight * entropy_estimate
-    neg_performance.backward()
+    R = Variable(FloatTensor(np.asarray([step.r for step in episode])))
+    Q_next = Variable(torch.cat((sum_log_probs.data[1:], ZeroTensor(1))))
+    error = ((R + gamma*Q_next - sum_log_probs)**2).mean()
+    error.backward()
 
     # Clip gradients to [-1, 1]
     for W in policy_net.parameters():
@@ -300,8 +215,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
     parser.add_argument('--num_episodes', default=100000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
-    parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
-    parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
+    parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo returns')
     args = parser.parse_args()
     print(args)
 
@@ -323,24 +237,19 @@ if __name__ == '__main__':
     if args.game == 'gridworld':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
-        value_net_layers = [2, 32, 1]
         game.set_options({'grid_y': 4, 'grid_x': 4})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
-        value_net_layers = [3, 32, 1]
         game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         import hunters as game
         policy_net_layers = [17, 128, 9]
-        value_net_layers = [8, 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunters': True,
                           'capture_reward': 10})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
-        value_net = build_value_net(value_net_layers)
-        optimizer_value_net = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
         optimizer_policy_net = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
 
         avg_value_error, avg_return = 0.0, 0.0
@@ -348,11 +257,9 @@ if __name__ == '__main__':
             #t = time.time()
             episode = run_episode(policy_net, gamma=args.gamma)
             #time_episode = time.time() - t
-            value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
-            avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return))
             #print time_episode
             #t = time.time()
-            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
+            train_policy_net(policy_net, episode, gamma=args.gamma)
             #print time.time() - t
