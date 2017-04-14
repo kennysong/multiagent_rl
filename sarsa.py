@@ -221,6 +221,11 @@ def train_Q(policy_net, log_partition_net, episode, gamma=1.0):
     # Do a step of RMSProp
     optimizer_Q.step()
 
+    Q_params = itertools.chain(policy_net.parameters(), log_partition_net.parameters())
+    return error.data[0], log_partition_net(states).mean().data[0], \
+           log_partition_net(states).std().data[0], \
+           sum([W.grad.data.norm()**2 for W in Q_params])**(0.5)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
     parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
@@ -275,8 +280,9 @@ if __name__ == '__main__':
             episode = run_episode(policy_net, gamma=args.gamma)
             #time_episode = time.time() - t
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return))
             #print time_episode
             #t = time.time()
-            train_Q(policy_net, log_partition_net, episode, gamma=args.gamma)
+            error, log_partition_mean, log_partition_std, grad_norm = \
+                train_Q(policy_net, log_partition_net, episode, gamma=args.gamma)
             #print time.time() - t
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'error': {}, 'log_partition_mean': {}, 'log_partition_std: {}, grad_norm: {}'}},".format(i, num_episode, len(episode), episode[0].G, avg_return, error, log_partition_mean, log_partition_std, grad_norm))
