@@ -237,10 +237,6 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
                td=None for a Monte-Carlo G_t
            gamma: discount term used for a TD(k) gradient term
     '''
-    # Warning
-    # if td is not None:
-    #     raise NotImplementedError('TD is not implemented for train_policy_net()')
-
     # Pre-compute baselines
     values = [run_value_net(val_baseline, step.s) for step in episode]
 
