@@ -11,6 +11,7 @@
 '''
 
 import argparse
+import itertools
 import numpy as np
 import os
 import random
@@ -66,6 +67,14 @@ def run_episode(policy_net, gamma=1.0):
         else: step.G = step.r + gamma*episode[len(episode)-i].G
 
     return episode
+
+def build_log_partition_net(layers):
+    '''Builds an MLP log partition network, which maps states to scalars.'''
+    log_partition_net = torch.nn.Sequential(
+                    torch.nn.Linear(layers[0], layers[1]),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(layers[1], layers[2]))
+    return log_partition_net.cuda() if cuda else log_partition_net
 
 def build_policy_net(layers):
     '''Builds an LSTM policy network, which maps states to action vectors.
@@ -149,8 +158,9 @@ def run_policy_net(policy_net, state):
 
     return a_indices
 
-def train_policy_net(policy_net, episode, gamma=1.0):
-    '''Update the policy network parameters with a SARSA update.
+def train_Q(policy_net, log_partition_net, episode, gamma=1.0):
+    '''Update the Q function parameters with a SARSA update. Recall that
+       Q(s, a) = log(policy_net(a | s)) + log_partition_net(s)
 
        That is, we want the policy net to minimize the squared error:
          (r + gamma*Q(s', a') - Q(s, a))^2
@@ -158,6 +168,7 @@ def train_policy_net(policy_net, episode, gamma=1.0):
 
        Parameters:
            policy_net: LSTM policy network
+           log_partition_net: MLP log partition network
            episode: list of EpisodeStep's
            gamma: discount term
     '''
@@ -195,17 +206,20 @@ def train_policy_net(policy_net, episode, gamma=1.0):
             sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
     # Do a backward pass to compute the policy gradient term
+    states = Variable(FloatTensor(np.asarray([step.s for step in episode])))
     R = Variable(FloatTensor(np.asarray([step.r for step in episode])))
-    Q_next = Variable(torch.cat((sum_log_probs.data[1:], ZeroTensor(1))))
-    error = ((R + gamma*Q_next - sum_log_probs)**2).mean()
+    Q = sum_log_probs + log_partition_net(states)
+    Q_next = Variable(torch.cat((sum_log_probs.data[1:], ZeroTensor(1)))) + \
+             log_partition_net(states)
+    error = ((R + gamma*Q_next - Q)**2).mean()
     error.backward()
 
-    # Clip gradients to [-1, 1]
+    # Clip LSTM policy net gradients to [-1, 1]
     for W in policy_net.parameters():
         W.grad.data.clamp_(-1,1)
 
     # Do a step of RMSProp
-    optimizer_policy_net.step()
+    optimizer_Q.step()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
@@ -237,6 +251,7 @@ if __name__ == '__main__':
     if args.game == 'gridworld':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
+        log_partition_net_layers = [2, 32, 1]
         game.set_options({'grid_y': 4, 'grid_x': 4})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
@@ -250,7 +265,9 @@ if __name__ == '__main__':
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
-        optimizer_policy_net = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
+        log_partition_net = build_log_partition_net(log_partition_net_layers)
+        Q_params = itertools.chain(policy_net.parameters(), log_partition_net.parameters())
+        optimizer_Q = torch.optim.RMSprop(Q_params, lr=1e-3, eps=1e-5)
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
@@ -261,5 +278,5 @@ if __name__ == '__main__':
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return))
             #print time_episode
             #t = time.time()
-            train_policy_net(policy_net, episode, gamma=args.gamma)
+            train_Q(policy_net, log_partition_net, episode, gamma=args.gamma)
             #print time.time() - t
