@@ -237,10 +237,6 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
                td=None for a Monte-Carlo G_t
            gamma: discount term used for a TD(k) gradient term
     '''
-    # Warning
-    if td is not None:
-        raise NotImplementedError('TD is not implemented for train_policy_net()')
-
     # Pre-compute baselines
     values = [run_value_net(val_baseline, step.s) for step in episode]
 
@@ -279,9 +275,23 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
         for j, step in enumerate(episode):
             sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
+    # Compute returns, either Monte-Carlo or TD(k)
+    if td is None: # Monte-Carlo
+        returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
+    else: # TD(k)
+        returns = []
+        for t in range(len(episode)):
+            t_end = t + td + 1  # TD requires we look forward until t_end
+            if t_end < len(episode):
+                G = sum([gamma**(j-t)*episode[j].r for j in range(t, t_end)]) + \
+                    values[t_end]
+            else:
+                G = sum([gamma**(j-t)*episode[j].r for j in range(t, len(episode))])
+            returns.append(G)
+        returns = Variable(FloatTensor(np.asarray(returns)))
+
     # Do a backward pass to compute the policy gradient term
     values = Variable(FloatTensor(np.asarray(values)))
-    returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
     neg_performance = (sum_log_probs * (values - returns)).sum() - entropy_weight * entropy_estimate
     neg_performance.backward()
 
