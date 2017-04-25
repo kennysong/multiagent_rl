@@ -346,7 +346,8 @@ if __name__ == '__main__':
         policy_net_layers = [3*(k+m) + 9, 128, 9]
         value_net_layers = [3*(k+m), 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunter': True,
-                          'capture_reward': 10, 'k': k, 'm': m})
+                          'timestep_reward': 0, 'capture_reward': 1,
+                          'k': k, 'm': m})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)

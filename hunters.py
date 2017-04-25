@@ -34,6 +34,8 @@ rabbit_action = None
 remove_hunter = False
 # capture_reward is the extra reward if a rabbit is captured
 capture_reward = 0
+# timestep_reward is the reward given at each time-step
+timestep_reward = -1
 
 def start_state():
     '''Returns a random initial state. The state vector is a flat array of:
@@ -84,7 +86,7 @@ def perform_action(s, a_indices):
             positions[i+1:i+3] = np.clip(sa, 0, n-1)
 
     # Remove rabbits (and optionally hunters) that overlap
-    reward = -1
+    reward = timestep_reward
     hunter_pos, rabbit_pos = positions[:3*k], positions[3*k:]
     for i in range(0, len(hunter_pos), 3):
         hunter = hunter_pos[i:i+3]
@@ -126,14 +128,16 @@ def array_equal(a, b):
 
 def set_options(options):
     '''Set some game options, if given.'''
-    global rabbit_action, remove_hunter, capture_reward, n, k, m, num_agents
+    global rabbit_action, remove_hunter, timestep_reward, capture_reward, n, k, m, num_agents
     rabbit_action = options.get('rabbit_action', rabbit_action)
     remove_hunter = options.get('remove_hunter', remove_hunter)
+    timestep_reward = options.get('timestep_reward', timestep_reward)
     capture_reward = options.get('capture_reward', capture_reward)
     n = options.get('n', n)
     k = options.get('k', k)
     m = options.get('m', m)
     num_agents = k
+    print(options)
 
 ## Functions to convert action representations ##
 

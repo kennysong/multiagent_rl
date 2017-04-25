@@ -107,6 +107,7 @@ def set_options(options):
     grid_x = options.get('grid_x', grid_x)
     grid_y = options.get('grid_y', grid_y)
     goal = np.array((0, grid_x-1))
+    print(options)
 
 def included(a, L):
     '''Returns if the np.array a is in a list of np.array's L.'''
