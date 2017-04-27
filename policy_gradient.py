@@ -207,7 +207,20 @@ def run_policy_net(policy_net, state):
         # Select action over possible ones
         action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
         dist = masked_softmax(o_n, action_mask)
-        a_index = torch.multinomial(dist.data,1)[0,0]
+        try:
+            a_index = torch.multinomial(dist.data,1)[0,0]
+        except RuntimeError as err:
+            print("ERROR")
+            print(err)
+            print('dist ', dist)
+            print('o_n', o_n)
+            print('h_n', h_n)
+            print('c_n', c_n)
+            print('x_n', x_n)
+            fn = str(random.random())
+            torch.save(policy_net.state_dict(), fn)
+            print('policy saved to ' + fn)
+            a_index = 0
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
@@ -342,7 +355,7 @@ if __name__ == '__main__':
         game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         import hunters as game
-        k, m = 2, 2
+        k, m = 4, 4
         policy_net_layers = [3*(k+m) + 9, 128, 9]
         value_net_layers = [3*(k+m), 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunter': True,
@@ -357,14 +370,14 @@ if __name__ == '__main__':
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
-            #t = time.time()
             episode = run_episode(policy_net, gamma=args.gamma)
-            #time_episode = time.time() - t
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            #print time_episode
-            #t = time.time()
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
-            #print time.time() - t
+
+        filename = str(random.random())
+        torch.save(policy_net.state_dict(), filename)
+        print('Policy saved to ' + filename)
+
