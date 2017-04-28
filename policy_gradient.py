@@ -169,7 +169,10 @@ def masked_softmax(logits, mask):
     Returns:
         probs: row-wise masked softmax of the logits
     """
-    scores = torch.exp(logits) * Variable(mask)
+    # Numerically stable softmax, see:
+    # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
+    b = torch.max(logits).expand_as(logits)
+    scores = torch.exp(logits - b) * Variable(mask)
     partitions = torch.sum(scores, 1)
     probs = scores / partitions.expand_as(scores)
     return probs
@@ -212,11 +215,11 @@ def run_policy_net(policy_net, state):
         except RuntimeError as err:
             print("ERROR")
             print(err)
+            print('state', state)
             print('dist ', dist)
             print('o_n', o_n)
-            print('h_n', h_n)
-            print('c_n', c_n)
-            print('x_n', x_n)
+            print('n', n)
+            print('action_mask', action_mask)
             fn = str(random.random())
             torch.save(policy_net.state_dict(), fn)
             print('policy saved to ' + fn)
@@ -382,4 +385,3 @@ if __name__ == '__main__':
         filename = str(random.random())
         torch.save(policy_net.state_dict(), filename)
         print('Policy saved to ' + filename)
-
