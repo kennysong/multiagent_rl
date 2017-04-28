@@ -221,6 +221,7 @@ def run_policy_net(policy_net, state):
             torch.save(policy_net.state_dict(), fn)
             print('policy saved to ' + fn)
             a_index = 0
+            1 / 0 # error
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
