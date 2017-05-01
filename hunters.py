@@ -104,11 +104,19 @@ def perform_action(s, a_indices):
 
 def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
-       bitmap of available actions. Hunters out of the game are filtered the
-       same as active hunters.
+       bitmap of available actions. Hunters out of the game can only choose
+       the "stay" action.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     avail_a = [1] * 9
     hunter_pos = state[3*agent_no + 1:3*agent_no + 3]
+
+    # Hunter is out of the game, can only stay
+    if state[3*agent_no] == 0:
+        avail_a = [0] * 9
+        avail_a[4] = 1
+        return avail_a
+
+    # Hunter is still in the game, check all possible actions
     for i in range(9):
         # Check if action moves us off the grid
         a = agent_action_space[i]

@@ -169,12 +169,18 @@ def masked_softmax(logits, mask):
     Returns:
         probs: row-wise masked softmax of the logits
     """
-    # Numerically stable softmax, see:
+    # Based on numerically stable softmax, see:
     # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
-    b = torch.max(logits).expand_as(logits)
-    scores = torch.exp(logits - b) * Variable(mask)
-    partitions = torch.sum(scores, 1)
-    probs = scores / partitions.expand_as(scores)
+
+    # b must be the max over the unmasked logits
+    inv_mask = ByteTensor(1 - mask.numpy().astype(int))
+    inf_logits = logits.masked_fill(Variable(inv_mask), float('-inf'))
+    b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
+
+    # Calculate softmax; masked elements may explode, but are forced to 0
+    scores = torch.exp(logits - b).masked_fill(Variable(inv_mask), 0)
+    total_scores = torch.sum(scores, 1).expand_as(scores)
+    probs = scores / total_scores
     return probs
 
 def run_policy_net(policy_net, state):
