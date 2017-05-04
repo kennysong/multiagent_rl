@@ -57,7 +57,7 @@ def perform_joint_action(s, joint_a):
 
 def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
-       bitmap of available actions.
+       bitmask of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     avail_a = [1, 1, 1]
     # Vertical agent

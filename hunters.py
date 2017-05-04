@@ -102,6 +102,12 @@ def perform_action(s, a_indices):
     s_next = np.concatenate((hunter_pos, rabbit_pos))
     return s_next, reward
 
+def perform_joint_action(s, joint_a):
+    '''Performs an action given by joint_a in state s. Returns:
+       (s_next, reward)'''
+    a_indices = joint_action_to_indices(joint_a)
+    return perform_action(s, a_indices)
+
 def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
        bitmap of available actions. Hunters out of the game can only choose
@@ -123,6 +129,30 @@ def filter_actions(state, agent_no):
         sa = hunter_pos + a
         if (sa[0] < 0 or sa[0] >= n) or (sa[1] < 0 or sa[1] >= n):
             avail_a[i] = 0
+    return avail_a
+
+def filter_joint_actions(state):
+    '''Filter the actions available in a given state. Returns a bitmask of
+       available actions. Hunters out of the game can only choose
+       the "stay" action.
+       E.g. an agent in a corner is not allowed to move into a wall.'''
+    # TODO: This seems super slow! Make this faster
+    joint_a = [0] * (9**k)
+    avail_a = [1] * (9**k)
+
+    # Check all possible actions (a lot!)
+    for joint_a_num in range(9**k):
+        # Convert the joint action into action indices
+        if joint_a_num > 0: joint_a[joint_a_num - 1] = 0
+        joint_a[joint_a_num] = 1
+        a_indices = joint_action_to_indices(joint_a)
+
+        # If all agents have valid action indices, this is a valid joint action
+        for agent_no, a_index in enumerate(a_indices):
+            avail_agent_a = filter_actions(state, agent_no)
+            if avail_agent_a[a_index] == 0:
+                avail_a[joint_a_num] = 0
+                break
     return avail_a
 
 def is_end(s):
@@ -159,6 +189,26 @@ def action_indices_to_coordinates(a_indices):
     '''Converts a list of action indices to action coordinates.'''
     coords = [agent_action_space[i] for i in a_indices]
     return np.concatenate(coords)
+
+def joint_action_to_indices(joint_a):
+    '''Convert a joint action into action indices. We use the transformation:
+                    action for n'th hunter = (J//A^n) % A
+       where J is the joint action number
+             A is the number of actions for each agent
+             n is the hunter number (starting from 0)
+
+       Intuitively, the
+         0th hunter will cycle through actions [0, A) on every +1 joint action number
+         1st hunter will cycle through actions [0, A) on every +A joint action number
+         2nd hunter will cycle through actions [0, A) on every +A^2 joint action number
+         nth hunter will cycle through actions [0, A) on every +A^n joint action number
+    '''
+    assert sum(joint_a) == 1
+    a_indices = [None] * k
+    joint_a_num = joint_a.index(1)
+    for hunter in range(k):
+        a_indices[hunter] = (joint_a_num // 9**hunter) % 9
+    return a_indices
 
 def opposite_direction(s, a, i):
     '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid

@@ -93,7 +93,7 @@ def filter_actions(state, agent_no):
     return actions
 
 def filter_joint_actions(state):
-    '''Filters the joint actions available in a given state. Returns a bitmap
+    '''Filters the joint actions available in a given state. Returns a bitmask
        of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     avail_a = [1] * 27
