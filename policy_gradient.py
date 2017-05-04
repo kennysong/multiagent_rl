@@ -216,21 +216,7 @@ def run_policy_net(policy_net, state):
         # Select action over possible ones
         action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
         dist = masked_softmax(o_n, action_mask)
-        try:
-            a_index = torch.multinomial(dist.data,1)[0,0]
-        except RuntimeError as err:
-            print("ERROR")
-            print(err)
-            print('state', state)
-            print('dist ', dist)
-            print('o_n', o_n)
-            print('n', n)
-            print('action_mask', action_mask)
-            fn = str(random.random())
-            torch.save(policy_net.state_dict(), fn)
-            print('policy saved to ' + fn)
-            a_index = 0
-            1 / 0 # error
+        a_index = torch.multinomial(dist.data,1)[0,0]
 
         # Record action for this iteration/agent
         a_indices.append(a_index)
@@ -337,6 +323,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
+    parser.add_argument('--save_policy', type=str, help='Save the trained policy under this filename')
     args = parser.parse_args()
     print(args)
 
@@ -389,6 +376,9 @@ if __name__ == '__main__':
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
 
-        filename = str(random.random())
-        torch.save(policy_net.state_dict(), filename)
-        print('Policy saved to ' + filename)
+        if args.save_policy is not None:
+            if args.num_rounds > 1:
+                torch.save(policy_net.state_dict(), args.save_policy + str(i))
+            else:
+                torch.save(policy_net.state_dict(), args.save_policy)
+            print('Policy saved to ' + args.save_policy)
