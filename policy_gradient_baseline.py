@@ -254,6 +254,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
+    parser.add_argument('--save_policy', type=str, help='Save the trained policy under this filename')
     args = parser.parse_args()
     print(args)
 
@@ -315,3 +316,9 @@ if __name__ == '__main__':
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
 
+        if args.save_policy is not None:
+            if args.num_rounds > 1:
+                torch.save(policy_net.state_dict(), args.save_policy + str(i))
+            else:
+                torch.save(policy_net.state_dict(), args.save_policy)
+            print('Policy saved to ' + args.save_policy)
