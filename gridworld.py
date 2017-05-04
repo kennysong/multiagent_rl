@@ -2,8 +2,8 @@
     This is a simple implementation of the two-agent Gridworld Cliff
     reinforcement learning task.
 
-    Adapted from Example 6.6 at:
-    https://webdocs.cs.ualberta.ca/~sutton/book/ebook/node65.html
+    Adapted from Example 6.6 (page 145) at:
+    http://people.inf.elte.hu/lorincz/Files/RL_2006/SuttonBook.pdf
 
     The board is a 4x12 matrix, with (using Numpy matrix indexing):
         [0, 0] as the start at top-left
