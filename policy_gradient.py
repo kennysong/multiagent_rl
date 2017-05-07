@@ -173,7 +173,7 @@ def masked_softmax(logits, mask):
     # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
 
     # b must be the max over the unmasked logits
-    inv_mask = ByteTensor(1 - mask.numpy().astype(int))
+    inv_mask = ByteTensor(1 - mask.cpu().numpy().astype(int))
     inf_logits = logits.masked_fill(Variable(inv_mask), float('-inf'))
     b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
 
@@ -307,7 +307,7 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
     # Clip gradients to [-1, 1] and turn NaNs to 0
     for W in policy_net.parameters():
         # TODO: Is this necessary?
-        W.grad.data = FloatTensor(np.nan_to_num(W.grad.data.numpy()))
+        # W.grad.data = FloatTensor(np.nan_to_num(W.grad.data.numpy()))
         W.grad.data.clamp_(-1,1)
 
     # Do a step of RMSProp
