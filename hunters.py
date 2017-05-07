@@ -136,24 +136,63 @@ def filter_joint_actions(state):
        available actions. Hunters out of the game can only choose
        the "stay" action.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    # TODO: This seems super slow! Make this faster
-    joint_a = [0] * (9**k)
-    avail_a = [1] * (9**k)
 
-    # Check all possible actions (a lot!)
-    for joint_a_num in range(9**k):
-        # Convert the joint action into action indices
-        if joint_a_num > 0: joint_a[joint_a_num - 1] = 0
-        joint_a[joint_a_num] = 1
-        a_indices = joint_action_to_indices(joint_a)
+    def _select_idx(actions, agent):
+        '''Returns all indexes that involve a specific action for one agent.'''
+        idx = np.zeros(9**k, dtype=bool)
+        for act in actions:
+            for s in range(act*(9**agent), 9**k, 9**(agent+1)):  # Magic
+                idx[s:s+9**agent] = 1
+        return idx
 
-        # If all agents have valid action indices, this is a valid joint action
-        for agent_no, a_index in enumerate(a_indices):
-            avail_agent_a = filter_actions(state, agent_no)
-            if avail_agent_a[a_index] == 0:
-                avail_a[joint_a_num] = 0
-                break
+    # Start with a ones vector and start invalidating batches of actions
+    avail_a = np.ones(9**k, dtype=int)
+
+    # If a hunter is out, invalidate actions except stay (index 4)
+    for agent in range(k):
+        if state[3*agent] == 0:  # Status bit == 0
+            idx = ~_select_idx([4], agent)
+            avail_a[idx] = 0
+
+    # If a hunter is on a border, invalidate actions that move off the grid
+    for agent in range(k):
+        if state[3*agent] == 0: continue  # Only look at hunters in the game
+        pos = state[3*agent+1:3*agent+3]
+        if pos[0] == 0:  # Against top wall
+            idx = _select_idx([0, 1, 2], agent)
+            avail_a[idx] = 0
+        elif pos[0] == n-1:  # Against bottom wall
+            idx = _select_idx([6, 7, 8], agent)
+            avail_a[idx] = 0
+
+        if pos[1] == 0:  # Against left wall
+            idx = _select_idx([0, 3, 6], agent)
+            avail_a[idx] = 0
+        elif pos[1] == n-1:  # Against right wall
+            idx = _select_idx([2, 5, 8], agent)
+            avail_a[idx] = 0
+
     return avail_a
+
+# def filter_joint_actions_test(state):
+#     '''This is just a brute force validator for filter_joint_actions().'''
+#     joint_a = [0] * (9**k)
+#     avail_a = [1] * (9**k)
+
+#     # Check all possible actions (a lot!)
+#     for joint_a_num in range(9**k):
+#         # Convert the joint action into action indices
+#         if joint_a_num > 0: joint_a[joint_a_num - 1] = 0
+#         joint_a[joint_a_num] = 1
+#         a_indices = joint_action_to_indices(joint_a)
+
+#         # If all agents have valid action indices, this is a valid joint action
+#         for agent_no, a_index in enumerate(a_indices):
+#             avail_agent_a = filter_actions(state, agent_no)
+#             if avail_agent_a[a_index] == 0:
+#                 avail_a[joint_a_num] = 0
+#                 break
+#     return np.array(avail_a)
 
 def is_end(s):
     '''Given a state, return if the game should end.'''
@@ -202,6 +241,7 @@ def joint_action_to_indices(joint_a):
          1st hunter will cycle through actions [0, A) on every +A joint action number
          2nd hunter will cycle through actions [0, A) on every +A^2 joint action number
          nth hunter will cycle through actions [0, A) on every +A^n joint action number
+       (This is also base A, in reverse digit order.)
     '''
     assert sum(joint_a) == 1
     a_indices = [None] * k
