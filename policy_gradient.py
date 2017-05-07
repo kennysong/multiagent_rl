@@ -202,10 +202,10 @@ def run_policy_net(policy_net, state):
     # Prepare initial inputs for policy_net
     a_indices = []
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
-    a_n = np.zeros(a_size)
+    # a_n = np.zeros(a_size)
     h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
-    policy_net.zero_grad()
+    # policy_net.zero_grad()
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
@@ -236,7 +236,8 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
             = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
 
-       (Notes: The sum is over the number of agents, each with an associated p)
+       (Notes: The sum is over the number of agents, each with an associated p
+               In practice, the time-steps are summed into one gradient update)
 
        Parameters:
            policy_net: LSTM policy network
@@ -248,11 +249,12 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
     '''
     # Pre-compute baselines
     values = [run_value_net(val_baseline, step.s) for step in episode]
+    values = Variable(FloatTensor(np.asarray(values)))
 
     # Prepare for one forward pass, with the batch containing the entire episode
-    a_indices = []
+    # a_indices = []
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
-    a_n = np.zeros(a_size)
+    # a_n = np.zeros(a_size)
     h_n_batch = Variable(ZeroTensor(len(episode), h_size))
     c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
@@ -300,7 +302,6 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
         returns = Variable(FloatTensor(np.asarray(returns)))
 
     # Do a backward pass to compute the policy gradient term
-    values = Variable(FloatTensor(np.asarray(values)))
     neg_performance = (sum_log_probs * (values - returns)).sum() - entropy_weight * entropy_estimate
     neg_performance.backward()
 
@@ -373,8 +374,9 @@ if __name__ == '__main__':
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
+
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
 
         if args.save_policy is not None:
             if args.num_rounds > 1:

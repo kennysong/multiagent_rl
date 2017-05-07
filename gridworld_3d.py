@@ -114,7 +114,7 @@ def a_indices_to_coordinates(a_indices):
 
 def joint_action_to_indices(joint_a):
     '''Convert a joint action into action indices.'''
-    a = action_space[joint_a.index(1)] + 1
+    a = action_space[joint_a] + 1
     return a.tolist()
 
 def set_options(options):

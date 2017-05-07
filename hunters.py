@@ -243,11 +243,11 @@ def joint_action_to_indices(joint_a):
          nth hunter will cycle through actions [0, A) on every +A^n joint action number
        (This is also base A, in reverse digit order.)
     '''
-    assert sum(joint_a) == 1
+    # assert sum(joint_a) == 1
     a_indices = [None] * k
-    joint_a_num = joint_a.index(1)
+    # joint_a_num = joint_a.index(1)
     for hunter in range(k):
-        a_indices[hunter] = (joint_a_num // 9**hunter) % 9
+        a_indices[hunter] = (joint_a // 9**hunter) % 9
     return a_indices
 
 def opposite_direction(s, a, i):
