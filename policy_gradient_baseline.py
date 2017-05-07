@@ -27,7 +27,6 @@ from torch.autograd import Variable
 EpisodeStep = namedlist('EpisodeStep', 's a r G', default=0)
 SMALL = 1e-7
 
-@profile
 def run_episode(policy_net, gamma=1.0):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
        which is a MLP that maps states to joint action probabilities.
@@ -67,7 +66,6 @@ def run_episode(policy_net, gamma=1.0):
 
     return episode
 
-@profile
 def build_value_net(layers):
     '''Builds an MLP value function approximator, which maps states to scalar
        values. It has one hidden layer with tanh activations.
@@ -80,7 +78,6 @@ def build_value_net(layers):
 
     return value_net.cuda() if cuda else value_net
 
-@profile
 def train_value_net(value_net, episode, td=None, gamma=1.0):
     '''Trains an MLP value function approximator based on the output of one
        episode, i.e. first-visit Monte-Carlo policy evaluation. The value
@@ -134,14 +131,12 @@ def train_value_net(value_net, episode, td=None, gamma=1.0):
 
     return loss.data[0]
 
-@profile
 def run_value_net(value_net, state):
     '''Wrapper function to feed one state into the given value network and
        return the value as a scalar.'''
     result = value_net(Variable(FloatTensor([state])))
     return result.data[0][0]
 
-@profile
 def build_policy_net(layers):
     '''Builds an MLP policy network, which maps states to action vectors.
 
@@ -152,7 +147,6 @@ def build_policy_net(layers):
     '''
     return build_value_net(layers)
 
-@profile
 def masked_softmax(logits, mask):
     """
     Parameters:
@@ -176,7 +170,6 @@ def masked_softmax(logits, mask):
     probs = scores / total_scores
     return probs
 
-@profile
 def run_policy_net(policy_net, state):
     '''Wrapper function to feed a given state into the given policy network and
        return an action vector, as well as parameter gradients.
@@ -199,7 +192,6 @@ def run_policy_net(policy_net, state):
 
     return a_index
 
-@profile
 def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0,
                      lr=3*1e-3):
     '''Update the policy network parameters with the REINFORCE algorithm.
@@ -325,7 +317,6 @@ if __name__ == '__main__':
         mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
         for W in mean_square: W += 1
 
-        episode_lens = 0
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
             episode = run_episode(policy_net, gamma=args.gamma)
@@ -334,11 +325,6 @@ if __name__ == '__main__':
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             train_policy_net(policy_net, episode, value_net, td=args.td_update, gamma=args.gamma)
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-
-            episode_lens += len(episode)
-            print(episode_lens)
-            if episode_lens > 25000:
-                break
 
         if args.save_policy is not None:
             if args.num_rounds > 1:
