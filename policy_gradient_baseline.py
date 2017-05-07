@@ -160,7 +160,7 @@ def masked_softmax(logits, mask):
     # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
 
     # b must be the max over the unmasked logits
-    inv_mask = ByteTensor(1 - mask.numpy().astype(int))
+    inv_mask = ByteTensor(1 - mask.cpu().numpy().astype(int))
     inf_logits = logits.masked_fill(Variable(inv_mask), float('-inf'))
     b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
 
