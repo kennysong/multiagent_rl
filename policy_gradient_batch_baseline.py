@@ -226,7 +226,7 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0,
     # Fill input_batch with state for each agent, for each time-step
     input_batch = ZeroTensor(len(episode), s_size)
     for j, step in enumerate(episode):
-        input_batch[j].copy_(torch.Tensor(step.s))
+        input_batch[j].copy_(FloatTensor(step.s))
     input_batch = Variable(input_batch)
 
     # Fill action_mask_batch with action masks for each state

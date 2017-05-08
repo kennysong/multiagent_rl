@@ -209,7 +209,7 @@ def run_policy_net(policy_net, state):
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
-        x_n.data.copy_(torch.Tensor([np.append(a_n, state)]))
+        x_n.data.copy_(FloatTensor([np.append(a_n, state)]))
         o_n, h_n, c_n = policy_net(x_n, h_n, c_n)
 
         # Select action over possible ones
@@ -263,7 +263,7 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
     # Fill input_batch with concat(a_{n-1}, state) for each agent, for each time-step
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            input_batch[i, j, a_size:].copy_(torch.Tensor(step.s))
+            input_batch[i, j, a_size:].copy_(FloatTensor(step.s))
             if i > 0: input_batch[i, j, step.a[i-1]] = 1
     input_batch = Variable(input_batch)
 
