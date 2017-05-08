@@ -202,10 +202,9 @@ def run_policy_net(policy_net, state):
     # Prepare initial inputs for policy_net
     a_indices = []
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
-    # a_n = np.zeros(a_size)
+    a_n = np.zeros(a_size)
     h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
-    # policy_net.zero_grad()
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
@@ -252,16 +251,14 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
     values = Variable(FloatTensor(np.asarray(values)))
 
     # Prepare for one forward pass, with the batch containing the entire episode
-    # a_indices = []
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
-    # a_n = np.zeros(a_size)
+    s_size = len(episode[0].s)
     h_n_batch = Variable(ZeroTensor(len(episode), h_size))
     c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
 
-    # Input to LSTM has size [num_agents, episode_len, each_input_size]
-    input_batch = ZeroTensor(game.num_agents, len(episode),
-                             a_size + len(episode[0].s))
+    # Batch input to LSTM has size [num_agents, episode_len, lstm_input_size]
+    input_batch = ZeroTensor(game.num_agents, len(episode), a_size + s_size)
 
     # Fill input_batch with concat(a_{n-1}, state) for each agent, for each time-step
     for i in range(game.num_agents):

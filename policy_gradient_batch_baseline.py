@@ -175,7 +175,7 @@ def run_policy_net(policy_net, state):
        return an action vector, as well as parameter gradients.
 
        Parameters:
-           policy_net: LSTM that given (x_n, h_n, c_n) returns o_nn, h_nn, c_nn
+           policy_net: MLP that given a state returns action probabilities
            state: state of the MDP
 
        Returns:
