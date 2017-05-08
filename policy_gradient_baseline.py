@@ -285,16 +285,16 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [2, 32, 9]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_y': 12, 'grid_x': 12})
     if args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [3, 64, 27]
         value_net_layers = [3, 32, 1]
-        game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         # Note: Not sure how many hidden layers to give the policy net
         import hunters as game
-        k, m = 3, 3
+        k, m = 2, 2
         if k == 1 or k == 2:
             policy_net_layers = [3*(k+m), 128, 9**k]
         elif k == 3:

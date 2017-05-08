@@ -164,7 +164,7 @@ def masked_softmax(logits, mask):
     """
     Parameters:
         logits: Variable of size [batch_size, d]
-        mask: FloatTensor of size [batch_size, d]
+        mask: Numpy array of size [batch_size, d]
 
     Returns:
         probs: row-wise masked softmax of the logits
@@ -173,12 +173,12 @@ def masked_softmax(logits, mask):
     # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
 
     # b must be the max over the unmasked logits
-    inv_mask = ByteTensor(1 - mask.cpu().numpy().astype(int))
-    inf_logits = logits.masked_fill(Variable(inv_mask), float('-inf'))
+    inv_mask = Variable(ByteTensor(1 - mask))
+    inf_logits = logits.masked_fill(inv_mask, float('-inf'))
     b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
 
     # Calculate softmax; masked elements may explode, but are forced to 0
-    scores = torch.exp(logits - b).masked_fill(Variable(inv_mask), 0)
+    scores = torch.exp(logits - b).masked_fill(inv_mask, 0)
     total_scores = torch.sum(scores, 1).expand_as(scores)
     probs = scores / total_scores
     return probs
@@ -213,7 +213,7 @@ def run_policy_net(policy_net, state):
         o_n, h_n, c_n = policy_net(x_n, h_n, c_n)
 
         # Select action over possible ones
-        action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
+        action_mask = np.expand_dims(game.filter_actions(state, n), axis=0)
         dist = masked_softmax(o_n, action_mask)
         a_index = torch.multinomial(dist.data,1)[0,0]
 
@@ -268,10 +268,10 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
     input_batch = Variable(input_batch)
 
     # Fill action_mask_batch with action masks for each state
-    action_mask_batch = ZeroTensor(game.num_agents, len(episode), a_size)
+    action_mask_batch = np.zeros((game.num_agents, len(episode), a_size), dtype=int)
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            action_mask_batch[i,j,:].copy_(torch.Tensor(game.filter_actions(step.s, i)))
+            action_mask_batch[i,j] = game.filter_actions(step.s, i)
 
     # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
     sum_log_probs = Variable(ZeroTensor(len(episode)))
@@ -344,7 +344,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_y': 12, 'grid_x': 12})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
@@ -352,7 +352,7 @@ if __name__ == '__main__':
         game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         import hunters as game
-        k, m = 4, 4
+        k, m = 2, 2
         policy_net_layers = [3*(k+m) + 9, 128, 9]
         value_net_layers = [3*(k+m), 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunter': True,

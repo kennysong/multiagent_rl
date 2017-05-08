@@ -113,7 +113,7 @@ def filter_actions(state, agent_no):
        bitmap of available actions. Hunters out of the game can only choose
        the "stay" action.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    avail_a = [1] * 9
+    avail_a = np.ones(9, dtype=int)
     hunter_pos = state[3*agent_no + 1:3*agent_no + 3]
 
     # Hunter is out of the game, can only stay

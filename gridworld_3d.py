@@ -77,26 +77,26 @@ def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
        bitmap of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    actions = [1, 1, 1]
+    avail_a = np.ones(3, dtype=int)
     # z-agent
     if agent_no == 0:
-        if state[0] == 0: actions[0] = 0
-        elif state[0] == grid_z-1: actions[2] = 0
+        if state[0] == 0: avail_a[0] = 0
+        elif state[0] == grid_z-1: avail_a[2] = 0
     # y-agent
     elif agent_no == 1:
-        if state[1] == 0: actions[0] = 0
-        elif state[1] == grid_y-1: actions[2] = 0
+        if state[1] == 0: avail_a[0] = 0
+        elif state[1] == grid_y-1: avail_a[2] = 0
     # x-agent
     elif agent_no == 2:
-        if state[2] == 0: actions[0] = 0
-        elif state[2] == grid_x-1: actions[2] = 0
-    return actions
+        if state[2] == 0: avail_a[0] = 0
+        elif state[2] == grid_x-1: avail_a[2] = 0
+    return avail_a
 
 def filter_joint_actions(state):
     '''Filters the joint actions available in a given state. Returns a bitmask
        of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    avail_a = [1] * 27
+    avail_a = np.ones(27, dtype=int)
     for i in range(len(action_space)):
         # Check if action moves us off the grid
         a = action_space[i]
