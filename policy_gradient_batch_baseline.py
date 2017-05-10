@@ -1,7 +1,10 @@
 '''
     This is a single-agent policy gradient implementation (REINFORCE with
     baselines). It is a baseline to compare multi-agent policy gradient to.
-    Works for any game that conforms to the interface:
+
+    Identical to policy_gradient_baseline.py, but backpropagates in a batch
+    after each episode, instead of after each action. Works for any game that
+    conforms to the interface:
 
       game.start_state() - returns start state of the game
       game.is_end(state) - given a state, return if the game/episode has ended
@@ -22,13 +25,13 @@ from torch.autograd import Variable
 
 # Define a EpisodeStep container for each step in an episode:
 #   s, a is the state-action pair visited during that step
-#   grad_W is gradient term sum(grad_W(log(p))); see train_policy_net()
 #   r is the reward received from that state-action pair
 #   G is the discounted return received from that state-action pair
-EpisodeStep = namedlist('EpisodeStep', 's a grad_W r G', default=0)
+EpisodeStep = namedlist('EpisodeStep', 's a r G', default=0)
+SMALL = 1e-7
 
 def run_episode(policy_net, gamma=1.0):
-    '''Runs one episode of a game to completion with a policy network,
+    '''Runs one episode of Gridworld Cliff to completion with a policy network,
        which is a MLP that maps states to joint action probabilities.
 
        Parameters:
@@ -45,13 +48,13 @@ def run_episode(policy_net, gamma=1.0):
     # Run game until agent reaches the end
     while not game.is_end(state):
         # Let our agent decide that to do at this state
-        a, grad_W = run_policy_net(policy_net, state)
+        a = run_policy_net(policy_net, state)
 
         # Take that action, then the game gives us the next state and reward
         next_s, r = game.perform_joint_action(state, a)
 
-        # Record state, action, grad_W, reward
-        episode.append(EpisodeStep(s=state, a=a, grad_W=grad_W, r=r))
+        # Record state, action, reward
+        episode.append(EpisodeStep(s=state, a=a, r=r))
         state = next_s
 
         # Terminate episode early
@@ -147,46 +150,52 @@ def build_policy_net(layers):
     '''
     return build_value_net(layers)
 
+def masked_softmax(logits, mask):
+    """
+    Parameters:
+        logits: Variable of size [batch_size, d]
+        mask: FloatTensor of size [batch_size, d]
+
+    Returns:
+        probs: row-wise masked softmax of the logits
+    """
+    # Based on numerically stable softmax, see:
+    # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
+
+    # b must be the max over the unmasked logits
+    inv_mask = ByteTensor(1 - mask.cpu().numpy().astype(int))
+    inf_logits = logits.masked_fill(Variable(inv_mask), float('-inf'))
+    b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
+
+    # Calculate softmax; masked elements may explode, but are forced to 0
+    scores = torch.exp(logits - b).masked_fill(Variable(inv_mask), 0)
+    total_scores = torch.sum(scores, 1).expand_as(scores)
+    probs = scores / total_scores
+    return probs
+
 def run_policy_net(policy_net, state):
     '''Wrapper function to feed a given state into the given policy network and
        return an action vector, as well as parameter gradients.
 
-       Essentially, run the policy_net MLP to get a probability vector for all
-       joint actions. Sample one, and denote its probability by p.
+       Parameters:
+           policy_net: LSTM that given (x_n, h_n, c_n) returns o_nn, h_nn, c_nn
+           state: state of the MDP
 
-       For each parameter W, the gradient term `grad_W(log(p))` is also
-       computed and returned. This is used in the REINFORCE algorithm; see
-       train_policy_net().
+       Returns:
+           a_index: joint action index
     '''
-    # Prepare for forward and backward pass
-    a_size = policy_net.layers[2]
-    a = [0] * a_size
-    policy_net.zero_grad()
-    softmax = torch.nn.Softmax()
-
     # Do a forward step through policy_net, filter actions, and softmax it
     x = Variable(FloatTensor([state]))
     o = policy_net(x)
-    action_mask = ByteTensor(game.filter_joint_actions(state))
-    filt_o = o[action_mask].resize(1, action_mask.sum())
-    dist = softmax(filt_o)
+    action_mask = FloatTensor(game.filter_joint_actions(state)).unsqueeze(0)
+    dist = masked_softmax(o, action_mask)
 
     # Sample an available action from dist
-    filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
-    a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
-    a[a_index] = 1
+    a_index = torch.multinomial(dist.data,1)[0,0]
 
-    # Calculate log(p + eps); eps for numerical stability
-    filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
-    log_p = (dist[0][filt_a_index] + 1e-8).log()
+    return a_index
 
-    # Get the gradients; clone() is needed as the parameter Tensors are reused
-    log_p.backward()
-    grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
-
-    return a, grad_W
-
-def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
+def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0,
                      lr=3*1e-3):
     '''Update the policy network parameters with the REINFORCE algorithm.
        For each parameter W of the policy network, for each time-step t in the
@@ -196,53 +205,56 @@ def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
        for all time steps in the episode.
 
        (Notes: The sum is over the number of agents, each with an associated p
-               The grad_W(sum(log_p)) are pre-computed in each EpisodeStep)
+               In practice, the time-steps are summed into one gradient update)
 
        Parameters:
            policy_net: LSTM policy network
            episode: list of EpisodeStep's
            val_baseline: value network used as the baseline term
-           td: k for a TD(k) estimate of G_t (requires val_baseline),
-               td=None for a Monte-Carlo G_t
+           td: k for a TD(k) estimate of G_t, td=None for a Monte-Carlo G_t
            gamma: the discount term used for a TD(k) gradient term
     '''
-    # Pre-compute baselines, if being used
-    if val_baseline is not None:
-        values = [run_value_net(val_baseline, step.s) for step in episode]
+    if td is not None:
+        raise NotImplementedError('TD returns not implemented for the baseline!')
 
-    # Accumulate the update terms for each step in the episode into W_step
-    W_step = [ZeroTensor(W.size()) for W in policy_net.parameters()]
-    for t, step in enumerate(episode):
-        s_t, G_t, grad_W = step.s, step.G, step.grad_W
-        for i in range(len(W_step)):
-            # Monte-Carlo baselined update
-            if val_baseline and td is None:
-                W_step[i] += grad_W[i] * (G_t - values[t])
-            # TD baselined update
-            elif val_baseline and td >= 0:
-                t_end = t + td + 1  # TD requires we look forward until t_end
-                if t_end < len(episode):
-                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, t_end)])
-                    W_step[i] += grad_W[i] * (r + values[t_end] - values[t])
-                else:
-                    r = sum([gamma**(j-t)*episode[j].r for j in range(t, len(episode))])
-                    W_step[i] += grad_W[i] * (r - values[t])
-            # Monte-Carlo update without baseline
-            else:
-                W_step[i] += grad_W[i] * G_t
+    # Pre-compute baselines
+    values = [run_value_net(val_baseline, step.s) for step in episode]
+    values = Variable(FloatTensor(np.asarray(values)))
 
-    # Gradient clipping
-    for i in range(len(W_step)):
-        W_step[i].clamp_(-1, 1)
+    # Prepare for one forward pass, with the batch containing the entire episode
+    a_size = policy_net.layers[2]
+    s_size = len(episode[0].s)
+    policy_net.zero_grad()
+
+    # Fill input_batch with state for each agent, for each time-step
+    input_batch = ZeroTensor(len(episode), s_size)
+    for j, step in enumerate(episode):
+        input_batch[j].copy_(torch.Tensor(step.s))
+    input_batch = Variable(input_batch)
+
+    # Fill action_mask_batch with action masks for each state
+    action_mask_batch = ZeroTensor(len(episode), a_size)
+    for j, step in enumerate(episode):
+        action_mask_batch[j].copy_(torch.Tensor(game.filter_joint_actions(step.s)))
+
+    # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
+    sum_log_probs = Variable(ZeroTensor(len(episode)))
+    o = policy_net(input_batch)
+    dist = masked_softmax(o, action_mask_batch)
+    for j, step in enumerate(episode):
+        sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a])
+
+    # Do the backward pass to get grad_W(sum(log(p))) * (G_t - baseline(s_t))
+    returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
+    neg_performance = (sum_log_probs * (values - returns)).sum()
+    neg_performance.backward()
+
+    # Clip gradients to [-1, 1]
+    for W in policy_net.parameters():
+        W.grad.data.clamp_(-1,1)
 
     # Do a step of RMSProp
-    eps = 1e-5  # For numerical stability
-    alpha = 0.9  # Weighted average factor
-    for i in range(len(W_step)):
-        mean_square[i] = alpha*mean_square[i] + (1-alpha)*W_step[i].pow(2)
-        W_step[i] = lr * W_step[i] / (mean_square[i] + eps).sqrt()
-    for i, W in enumerate(policy_net.parameters()):
-        W.data += W_step[i]
+    optimizer_policy_net.step()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
@@ -301,6 +313,7 @@ if __name__ == '__main__':
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
+        optimizer_policy_net = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
         optimizer_value_net = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
 
         # RMSProp variables for policy net
@@ -313,8 +326,8 @@ if __name__ == '__main__':
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
+            train_policy_net(policy_net, episode, value_net, td=args.td_update, gamma=args.gamma)
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
 
         if args.save_policy is not None:
             if args.num_rounds > 1:

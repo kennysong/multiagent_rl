@@ -75,7 +75,7 @@ def is_end(s):
 
 def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
-       bitmap of available states.
+       bitmap of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     actions = [1, 1, 1]
     # z-agent
@@ -93,8 +93,8 @@ def filter_actions(state, agent_no):
     return actions
 
 def filter_joint_actions(state):
-    '''Filters the joint actions available in a given state. Returns a bitmap
-       of available states.
+    '''Filters the joint actions available in a given state. Returns a bitmask
+       of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     avail_a = [1] * 27
     for i in range(len(action_space)):
@@ -124,6 +124,7 @@ def set_options(options):
     grid_y = options.get('grid_y', grid_y)
     grid_z = options.get('grid_z', grid_z)
     goal = np.array((0, grid_y-1, grid_x-1))
+    print(options)
 
 def included(a, L):
     '''Returns if the np.array a is in a list of np.array's L.'''

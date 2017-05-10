@@ -2,8 +2,8 @@
     This is a simple implementation of the two-agent Gridworld Cliff
     reinforcement learning task.
 
-    Adapted from Example 6.6 at:
-    https://webdocs.cs.ualberta.ca/~sutton/book/ebook/node65.html
+    Adapted from Example 6.6 (page 145) at:
+    http://people.inf.elte.hu/lorincz/Files/RL_2006/SuttonBook.pdf
 
     The board is a 4x12 matrix, with (using Numpy matrix indexing):
         [0, 0] as the start at top-left
@@ -57,7 +57,7 @@ def perform_joint_action(s, joint_a):
 
 def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
-       bitmap of available states.
+       bitmask of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     avail_a = [1, 1, 1]
     # Vertical agent
@@ -72,7 +72,7 @@ def filter_actions(state, agent_no):
 
 def filter_joint_actions(state):
     '''Filters the joint actions available in a given state. Returns a bitmap
-       of available states.
+       of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
     avail_a = [1] * 9
     for i in range(len(action_space)):
@@ -107,6 +107,7 @@ def set_options(options):
     grid_x = options.get('grid_x', grid_x)
     grid_y = options.get('grid_y', grid_y)
     goal = np.array((0, grid_x-1))
+    print(options)
 
 def included(a, L):
     '''Returns if the np.array a is in a list of np.array's L.'''

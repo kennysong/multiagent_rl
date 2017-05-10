@@ -7,10 +7,11 @@
     different movement patterns. There is a reward of -1 per time step (and
     optionally a +1 reward on capturing a rabbit).
 
-    States are size 2*k+2*m flattened arrays of:
+    States are size 3*k+3*m flattened arrays of:
       concat(hunter positions, rabbit positions)
     Positions are of the form:
-      [0, 0] = top-left, [n-1, n-1] = top-bottom, [-1, -1] = removed
+      [in-game, y-position, x-position], so
+      [1, 0, 0] = top-left, [1, 0, n-1] = top-right, [0, -1, -1] = removed
 
     Actions are size 2*k flattened arrays of:
       concat(hunter 1 movement, hunter 2 movement, ..., hunter k movement)
@@ -33,15 +34,21 @@ rabbit_action = None
 remove_hunter = False
 # capture_reward is the extra reward if a rabbit is captured
 capture_reward = 0
+# timestep_reward is the reward given at each time-step
+timestep_reward = -1
 
 def start_state():
     '''Returns a random initial state. The state vector is a flat array of:
         concat(hunter positions, rabbit positions).'''
-    return np.random.randint(0, n, size=2*k+2*m)
+    start = np.random.randint(0, n, size=3*k+3*m)
+    start[::3] = 1
+    return start
 
 def valid_state(s):
     '''Returns if the given state vector is valid.'''
-    return s.shape == (2*k+2*m, ) and np.all([-1 <= e < n for e in s])
+    return s.shape == (3*k+3*m, ) and \
+           np.all([-1 <= e < n for e in s]) and \
+           np.all([e in (0, 1) for e in s[::3]])
 
 def valid_action(a):
     '''Returns if the given action vector is valid'''
@@ -70,144 +77,200 @@ def perform_action(s, a_indices):
     # Get positions after hunter and rabbit actions
     a = np.concatenate((a, rabbit_a))
     positions = np.zeros(len(s), dtype=np.int)
-    for i in range(len(s)):
-        if s[i] == -1:
-            positions[i] = s[i]
-        elif 0 <= s[i] + a[i] < n:
-            positions[i] = s[i] + a[i]
+    for i in range(0, len(s), 3):
+        if s[i] == 0:
+            positions[i:i+3] = [0, -1, -1]
         else:
-            positions[i] = s[i]
+            positions[i] = 1
+            sa = s[i+1:i+3] + a[i-(i/3):i-(i/3)+2]
+            positions[i+1:i+3] = np.clip(sa, 0, n-1)
 
     # Remove rabbits (and optionally hunters) that overlap
-    reward = -1
-    hunter_pos, rabbit_pos = positions[:2*k], positions[2*k:]
-    for i in range(0, len(hunter_pos), 2):
-        hunter = hunter_pos[i:i+2]
-        for j in range(0, len(rabbit_pos), 2):
-            rabbit = rabbit_pos[j:j+2]
-            if array_equal(hunter, rabbit) and hunter[0] != -1:
+    reward = timestep_reward
+    hunter_pos, rabbit_pos = positions[:3*k], positions[3*k:]
+    for i in range(0, len(hunter_pos), 3):
+        hunter = hunter_pos[i:i+3]
+        for j in range(0, len(rabbit_pos), 3):
+            rabbit = rabbit_pos[j:j+3]
+            if hunter[0] == 1 and rabbit[0] == 1 and array_equal(hunter, rabbit):
                 # A rabbit has been captured
-                rabbit_pos[j:j+2] = [-1, -1]
+                rabbit_pos[j:j+3] = [0, -1, -1]
                 reward += capture_reward
-                if remove_hunter: hunter_pos[i:i+2] = [-1, -1]
+                if remove_hunter: hunter_pos[i:i+3] = [0, -1, -1]
 
     # Return (s_next, reward)
     s_next = np.concatenate((hunter_pos, rabbit_pos))
     return s_next, reward
 
-def opposite_direction(s, a, i):
-    '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid
-       the closest hunter (after hunters take action a).
-    '''
-    # Calculate hunter positions after a
-    hunter_s = np.array(s[:2*k])
-    for j in range(2*k):
-        if hunter_s[j] == -1:
-            continue
-        elif 0 <= hunter_s[j] + a[j] < n:
-            hunter_s[j] += a[j]
-
-    # Find position of closest hunter
-    rabbit = s[i:i+2]
-    distance = float('inf')
-    for j in range(0, 2*k, 2):
-        d = np.linalg.norm(rabbit - s[j:j+2])
-        if d < distance:
-            closest_hunter = s[j:j+2]
-
-    # Calculate opposite direction
-    return np.sign(rabbit - closest_hunter)
+def perform_joint_action(s, joint_a):
+    '''Performs an action given by joint_a in state s. Returns:
+       (s_next, reward)'''
+    a_indices = joint_action_to_indices(joint_a)
+    return perform_action(s, a_indices)
 
 def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
-       bitmap of available states.
+       bitmap of available actions. Hunters out of the game can only choose
+       the "stay" action.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    # TODO: Implement this!
-    raise NotImplementedError('Need to implement filter_actions() for hunters')
+    avail_a = [1] * 9
+    hunter_pos = state[3*agent_no + 1:3*agent_no + 3]
+
+    # Hunter is out of the game, can only stay
+    if state[3*agent_no] == 0:
+        avail_a = [0] * 9
+        avail_a[4] = 1
+        return avail_a
+
+    # Hunter is still in the game, check all possible actions
+    for i in range(9):
+        # Check if action moves us off the grid
+        a = agent_action_space[i]
+        sa = hunter_pos + a
+        if (sa[0] < 0 or sa[0] >= n) or (sa[1] < 0 or sa[1] >= n):
+            avail_a[i] = 0
+    return avail_a
+
+def filter_joint_actions(state):
+    '''Filter the actions available in a given state. Returns a bitmask of
+       available actions. Hunters out of the game can only choose
+       the "stay" action.
+       E.g. an agent in a corner is not allowed to move into a wall.'''
+
+    def _select_idx(actions, agent):
+        '''Returns all indexes that involve a specific action for one agent.'''
+        idx = np.zeros(9**k, dtype=bool)
+        for act in actions:
+            for s in range(act*(9**agent), 9**k, 9**(agent+1)):  # Magic
+                idx[s:s+9**agent] = 1
+        return idx
+
+    # Start with a ones vector and start invalidating batches of actions
+    avail_a = np.ones(9**k, dtype=int)
+
+    # If a hunter is out, invalidate actions except stay (index 4)
+    for agent in range(k):
+        if state[3*agent] == 0:  # Status bit == 0
+            idx = ~_select_idx([4], agent)
+            avail_a[idx] = 0
+
+    # If a hunter is on a border, invalidate actions that move off the grid
+    for agent in range(k):
+        if state[3*agent] == 0: continue  # Only look at hunters in the game
+        pos = state[3*agent+1:3*agent+3]
+        if pos[0] == 0:  # Against top wall
+            idx = _select_idx([0, 1, 2], agent)
+            avail_a[idx] = 0
+        elif pos[0] == n-1:  # Against bottom wall
+            idx = _select_idx([6, 7, 8], agent)
+            avail_a[idx] = 0
+
+        if pos[1] == 0:  # Against left wall
+            idx = _select_idx([0, 3, 6], agent)
+            avail_a[idx] = 0
+        elif pos[1] == n-1:  # Against right wall
+            idx = _select_idx([2, 5, 8], agent)
+            avail_a[idx] = 0
+
+    return avail_a
+
+# def filter_joint_actions_test(state):
+#     '''This is just a brute force validator for filter_joint_actions().'''
+#     joint_a = [0] * (9**k)
+#     avail_a = [1] * (9**k)
+
+#     # Check all possible actions (a lot!)
+#     for joint_a_num in range(9**k):
+#         # Convert the joint action into action indices
+#         if joint_a_num > 0: joint_a[joint_a_num - 1] = 0
+#         joint_a[joint_a_num] = 1
+#         a_indices = joint_action_to_indices(joint_a)
+
+#         # If all agents have valid action indices, this is a valid joint action
+#         for agent_no, a_index in enumerate(a_indices):
+#             avail_agent_a = filter_actions(state, agent_no)
+#             if avail_agent_a[a_index] == 0:
+#                 avail_a[joint_a_num] = 0
+#                 break
+#     return np.array(avail_a)
 
 def is_end(s):
     '''Given a state, return if the game should end.'''
-    rabbit_pos = s[2*k:]
-    return (rabbit_pos == -1).all()
+    rabbit_status = s[3*k::3]
+    return (rabbit_status == 0).all()
 
 def array_equal(a, b):
-    '''Because np.array_equal() is too slow. Two-element arrays only.'''
-    return a[0] == b[0] and a[1] == b[1]
+    '''Because np.array_equal() is too slow. Three-element arrays only.'''
+    return a[0] == b[0] and a[1] == b[1] and a[2] == b[2]
 
 def set_options(options):
     '''Set some game options, if given.'''
-    global rabbit_action, remove_hunter, capture_reward
+    global rabbit_action, remove_hunter, timestep_reward, capture_reward, n, k, m, num_agents
     rabbit_action = options.get('rabbit_action', rabbit_action)
     remove_hunter = options.get('remove_hunter', remove_hunter)
+    timestep_reward = options.get('timestep_reward', timestep_reward)
     capture_reward = options.get('capture_reward', capture_reward)
+    n = options.get('n', n)
+    k = options.get('k', k)
+    m = options.get('m', m)
+    num_agents = k
+    print(options)
 
 ## Functions to convert action representations ##
 
-action_index_to_coords = [
+agent_action_space = [
     np.array([-1, -1]), np.array([-1, 0]), np.array([-1, 1]),
     np.array([0, -1]), np.array([0, 0]), np.array([0, 1]),
     np.array([1, -1]), np.array([1, 0]), np.array([1, 1])
 ]
 
-def action_index_to_coordinates(index):
-    '''Converts an action index 0 to 8 to an agent's action coordinates.'''
-    assert 0 <= index <= 8
-    return action_index_to_coords[index]
-
 def action_indices_to_coordinates(a_indices):
     '''Converts a list of action indices to action coordinates.'''
-    coords = [action_index_to_coordinates(i) for i in a_indices]
+    coords = [agent_action_space[i] for i in a_indices]
     return np.concatenate(coords)
 
-def action_coordinates_to_index(coords):
-    '''Converts an agent's action coordinates to an index 0 to 8.'''
-    assert -1 <= coords[0] <= 1 and -1 <= coords[1] <= 1
-    matches = [np.array_equal(coords, c) for c in action_index_to_coords]
-    return matches.index(True)
+def joint_action_to_indices(joint_a):
+    '''Convert a joint action into action indices. We use the transformation:
+                    action for n'th hunter = (J//A^n) % A
+       where J is the joint action number
+             A is the number of actions for each agent
+             n is the hunter number (starting from 0)
 
-## Functions to convert state representations ##
+       Intuitively, the
+         0th hunter will cycle through actions [0, A) on every +1 joint action number
+         1st hunter will cycle through actions [0, A) on every +A joint action number
+         2nd hunter will cycle through actions [0, A) on every +A^2 joint action number
+         nth hunter will cycle through actions [0, A) on every +A^n joint action number
+       (This is also base A, in reverse digit order.)
+    '''
+    assert sum(joint_a) == 1
+    a_indices = [None] * k
+    joint_a_num = joint_a.index(1)
+    for hunter in range(k):
+        a_indices[hunter] = (joint_a_num // 9**hunter) % 9
+    return a_indices
 
-state_index_to_coords = [np.array((col, row)) for col in range(n)
-                                              for row in range(n)] + \
-                        [np.array((-1, -1))]
+def opposite_direction(s, a, i):
+    '''Returns the direction the rabbit at s[i], s[i+1] should move to avoid
+       the closest hunter (after hunters take action a).
+    '''
+    raise NotImplementedError('TODO: allow rabbits to move in opposite direction')
 
-def state_index_to_coordinates(index):
-    '''Converts a state index 0 to (n*n-1) to an agent's state coordinates.'''
-    assert 0 <= index < n*n
-    return state_index_to_coords[index]
+    # # Calculate hunter positions after a
+    # hunter_s = np.array(s[:2*k])
+    # for j in range(2*k):
+    #     if hunter_s[j] == -1:
+    #         continue
+    #     elif 0 <= hunter_s[j] + a[j] < n:
+    #         hunter_s[j] += a[j]
 
-def state_coordinates_to_index(coords):
-    '''Converts an agent's state coordinates to an index 0 to (n*n-1).'''
-    assert -1 <= coords[0] < n and -1 <= coords[1] < n
-    matches = [np.array_equal(coords, c) for c in state_index_to_coords]
-    return matches.index(True)
+    # # Find position of closest hunter
+    # rabbit = s[i:i+2]
+    # distance = float('inf')
+    # for j in range(0, 2*k, 2):
+    #     d = np.linalg.norm(rabbit - s[j:j+2])
+    #     if d < distance:
+    #         closest_hunter = s[j:j+2]
 
-def state_coordinates_to_kmhot(state):
-    '''Converts a coordinate state vector to a (k+m)-hot state vector.'''
-    onehots = []
-    for i in range(k+m):
-        s = state[2*i:2*i+2]
-        if np.array_equal(s, np.array([-1, -1])):
-            # All zero vector corresponds to [-1, -1]
-            onehots.append(np.zeros(n*n))
-        else:
-            index = state_coordinates_to_index(s)
-            onehot = np.zeros(n*n)
-            onehot[index] = 1
-            onehots.append(onehot)
-    return np.concatenate(onehots)
-
-def state_kmhot_to_coordinates(kmhot):
-    '''Converts a (k+m)-hot state vector to a coordinate state vector.'''
-    coords = []
-    for i in range(k+m):
-        onehot = kmhot[i*(n*n):(i+1)*(n*n)]
-        where = np.where(onehot == 1)
-        if len(where[0]) == 0:
-            # All zero vector corresponds to [-1, -1]
-            coords.append(np.array([-1, -1]))
-        else:
-            index = where[0][0]
-            state = state_index_to_coordinates(index)
-            coords.append(state)
-    return np.concatenate(coords)
+    # # Calculate opposite direction
+    # return np.sign(rabbit - closest_hunter)

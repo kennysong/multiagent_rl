@@ -169,9 +169,18 @@ def masked_softmax(logits, mask):
     Returns:
         probs: row-wise masked softmax of the logits
     """
-    scores = torch.exp(logits) * Variable(mask)
-    partitions = torch.sum(scores, 1)
-    probs = scores / partitions.expand_as(scores)
+    # Based on numerically stable softmax, see:
+    # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
+
+    # b must be the max over the unmasked logits
+    inv_mask = ByteTensor(1 - mask.cpu().numpy().astype(int))
+    inf_logits = logits.masked_fill(Variable(inv_mask), float('-inf'))
+    b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
+
+    # Calculate softmax; masked elements may explode, but are forced to 0
+    scores = torch.exp(logits - b).masked_fill(Variable(inv_mask), 0)
+    total_scores = torch.sum(scores, 1).expand_as(scores)
+    probs = scores / total_scores
     return probs
 
 def run_policy_net(policy_net, state):
@@ -295,8 +304,10 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
     neg_performance = (sum_log_probs * (values - returns)).sum() - entropy_weight * entropy_estimate
     neg_performance.backward()
 
-    # Clip gradients to [-1, 1]
+    # Clip gradients to [-1, 1] and turn NaNs to 0
     for W in policy_net.parameters():
+        # TODO: Is this necessary?
+        # W.grad.data = FloatTensor(np.nan_to_num(W.grad.data.numpy()))
         W.grad.data.clamp_(-1,1)
 
     # Do a step of RMSProp
@@ -312,6 +323,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
     parser.add_argument('--td_update', type=int, help='k for a TD(k) update term for the policy and value nets; exclude for a Monte-Carlo update')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo and TD returns')
+    parser.add_argument('--save_policy', type=str, help='Save the trained policy under this filename')
     args = parser.parse_args()
     print(args)
 
@@ -342,10 +354,12 @@ if __name__ == '__main__':
         game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         import hunters as game
-        policy_net_layers = [17, 128, 9]
-        value_net_layers = [8, 64, 1]
-        game.set_options({'rabbit_action': None, 'remove_hunters': True,
-                          'capture_reward': 10})
+        k, m = 4, 4
+        policy_net_layers = [3*(k+m) + 9, 128, 9]
+        value_net_layers = [3*(k+m), 64, 1]
+        game.set_options({'rabbit_action': None, 'remove_hunter': True,
+                          'timestep_reward': 0, 'capture_reward': 1,
+                          'k': k, 'm': m})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
@@ -355,14 +369,16 @@ if __name__ == '__main__':
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
-            #t = time.time()
             episode = run_episode(policy_net, gamma=args.gamma)
-            #time_episode = time.time() - t
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
-            #print time_episode
-            #t = time.time()
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
-            #print time.time() - t
+
+        if args.save_policy is not None:
+            if args.num_rounds > 1:
+                torch.save(policy_net.state_dict(), args.save_policy + str(i))
+            else:
+                torch.save(policy_net.state_dict(), args.save_policy)
+            print('Policy saved to ' + args.save_policy)
