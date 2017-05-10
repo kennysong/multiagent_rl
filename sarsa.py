@@ -104,14 +104,23 @@ def masked_softmax(logits, mask):
     """
     Parameters:
         logits: Variable of size [batch_size, d]
-        mask: FloatTensor of size [batch_size, d]
+        mask: Numpy array of size [batch_size, d]
 
     Returns:
         probs: row-wise masked softmax of the logits
     """
-    scores = torch.exp(logits) * Variable(mask)
-    partitions = torch.sum(scores, 1)
-    probs = scores / partitions.expand_as(scores)
+    # Based on numerically stable softmax, see:
+    # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
+
+    # b must be the max over the unmasked logits
+    inv_mask = Variable(ByteTensor(1 - mask))
+    inf_logits = logits.masked_fill(inv_mask, float('-inf'))
+    b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
+
+    # Calculate softmax; masked elements may explode, but are forced to 0
+    scores = torch.exp(logits - b).masked_fill(inv_mask, 0)
+    total_scores = torch.sum(scores, 1).expand_as(scores)
+    probs = scores / total_scores
     return probs
 
 def run_policy_net(policy_net, state):
@@ -136,7 +145,6 @@ def run_policy_net(policy_net, state):
     a_n = np.zeros(a_size)
     h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
-    policy_net.zero_grad()
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
@@ -145,7 +153,7 @@ def run_policy_net(policy_net, state):
         o_n, h_n, c_n = policy_net(x_n, h_n, c_n)
 
         # Select action over possible ones
-        action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
+        action_mask = np.expand_dims(game.filter_actions(state, n), axis=0)
         dist = masked_softmax(o_n, action_mask)
         a_index = torch.multinomial(dist.data,1)[0,0]
 
@@ -173,29 +181,27 @@ def train_Q(policy_net, log_partition_net, episode, gamma=1.0):
            gamma: discount term
     '''
     # Prepare for one forward pass, with the batch containing the entire episode
-    a_indices = []
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
-    a_n = np.zeros(a_size)
+    s_size = len(episode[0].s)
     h_n_batch = Variable(ZeroTensor(len(episode), h_size))
     c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
 
-    # Input to LSTM has size [num_agents, episode_len, each_input_size]
-    input_batch = ZeroTensor(game.num_agents, len(episode),
-                             a_size + len(episode[0].s))
+    # Batch input to LSTM has size [num_agents, episode_len, lstm_input_size]
+    input_batch = ZeroTensor(game.num_agents, len(episode), a_size + s_size)
 
     # Fill input_batch with concat(a_{n-1}, state) for each agent, for each time-step
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            input_batch[i, j, a_size:].copy_(torch.Tensor(step.s))
+            input_batch[i, j, a_size:].copy_(FloatTensor(step.s))
             if i > 0: input_batch[i, j, step.a[i-1]] = 1
     input_batch = Variable(input_batch)
 
     # Fill action_mask_batch with action masks for each state
-    action_mask_batch = ZeroTensor(game.num_agents, len(episode), a_size)
+    action_mask_batch = np.zeros((game.num_agents, len(episode), a_size), dtype=int)
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            action_mask_batch[i,j,:].copy_(torch.Tensor(game.filter_actions(step.s, i)))
+            action_mask_batch[i,j] = game.filter_actions(step.s, i)
 
     # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
     sum_log_probs = Variable(ZeroTensor(len(episode)))
@@ -216,15 +222,17 @@ def train_Q(policy_net, log_partition_net, episode, gamma=1.0):
 
     # Clip LSTM policy net gradients to [-1, 1]
     for W in policy_net.parameters():
+        # TODO: Is this necessary?
+        W.grad.data = FloatTensor(np.nan_to_num(W.grad.data.numpy()))
         W.grad.data.clamp_(-1,1)
 
     # Do a step of RMSProp
     optimizer_Q.step()
 
-    Q_params = itertools.chain(policy_net.parameters(), log_partition_net.parameters())
+    # params_Q = itertools.chain(policy_net.parameters(), log_partition_net.parameters())
     return error.data[0], log_partition_net(states).mean().data[0], \
            log_partition_net(states).std().data[0], \
-           sum([W.grad.data.norm()**2 for W in Q_params])**(0.5)
+           sum([W.grad.data.norm()**2 for W in params_Q])**(0.5)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
@@ -271,18 +279,14 @@ if __name__ == '__main__':
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         log_partition_net = build_log_partition_net(log_partition_net_layers)
-        Q_params = itertools.chain(policy_net.parameters(), log_partition_net.parameters())
-        optimizer_Q = torch.optim.RMSprop(Q_params, lr=1e-3, eps=1e-5)
+        params_Q = itertools.chain(policy_net.parameters(), log_partition_net.parameters())
+        optimizer_Q = torch.optim.RMSprop(params_Q, lr=1e-3, eps=1e-5)
 
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
-            #t = time.time()
             episode = run_episode(policy_net, gamma=args.gamma)
-            #time_episode = time.time() - t
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            #print time_episode
-            #t = time.time()
             error, log_partition_mean, log_partition_std, grad_norm = \
                 train_Q(policy_net, log_partition_net, episode, gamma=args.gamma)
-            #print time.time() - t
+
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'error': {}, 'log_partition_mean': {}, 'log_partition_std: {}, grad_norm: {}'}},".format(i, num_episode, len(episode), episode[0].G, avg_return, error, log_partition_mean, log_partition_std, grad_norm))
