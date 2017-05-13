@@ -248,6 +248,8 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0,
 
     # Clip gradients to [-1, 1]
     for W in policy_net.parameters():
+        # TODO: Is this necessary?
+        W.grad.data = FloatTensor(np.nan_to_num(W.grad.data.numpy()))
         W.grad.data.clamp_(-1,1)
 
     # Do a step of RMSProp
