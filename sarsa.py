@@ -166,7 +166,7 @@ def run_policy_net(policy_net, state):
 
     return a_indices
 
-def train_Q(policy_net, log_partition_net, episode, gamma=1.0):
+def train_Q(policy_net, log_partition_net, target_net, target_log_partition_net, episode, gamma=1.0):
     '''Update the Q function parameters with a SARSA update. Recall that
        Q(s, a) = log(policy_net(a | s)) + log_partition_net(s)
 
@@ -211,12 +211,20 @@ def train_Q(policy_net, log_partition_net, episode, gamma=1.0):
         for j, step in enumerate(episode):
             sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
+    # Do the same thing, but using the target network
+    target_sum_log_probs = Variable(ZeroTensor(len(episode)))
+    for i in range(game.num_agents):
+        o_n, h_n_batch, c_n_batch = target_net(input_batch[i], h_n_batch, c_n_batch)
+        dist = masked_softmax(o_n, action_mask_batch[i])
+        for j, step in enumerate(episode):
+            target_sum_log_probs[j] = target_sum_log_probs[j] + torch.log(dist[j, step.a[i]])
+
     # Do a backward pass to compute the policy gradient term
     states = Variable(FloatTensor(np.asarray([step.s for step in episode])))
     R = Variable(FloatTensor(np.asarray([step.r for step in episode])))
     Q = sum_log_probs + log_partition_net(states)
-    Q_next = Variable(torch.cat((sum_log_probs.data[1:], ZeroTensor(1)))) + \
-             log_partition_net(states)
+    Q_next = Variable(torch.cat((target_sum_log_probs.data[1:], ZeroTensor(1)))) + \
+             target_log_partition_net(states)
     error = ((R + gamma*Q_next - Q)**2).mean()
     error.backward()
 
@@ -242,6 +250,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
     parser.add_argument('--num_episodes', default=100000, type=int, help='Number of episodes to run in a round of training')
     parser.add_argument('--num_rounds', default=1, type=int, help='How many rounds of training to run')
+    parser.add_argument('--target_update', default=100, type=int, help='Update the target network parameters every N iterations')
     parser.add_argument('--gamma', default=1, type=float, help='Global discount factor for Monte-Carlo returns')
     args = parser.parse_args()
     print(args)
@@ -282,11 +291,20 @@ if __name__ == '__main__':
         params_Q = itertools.chain(policy_net.parameters(), log_partition_net.parameters())
         optimizer_Q = torch.optim.RMSprop(params_Q, lr=1e-3, eps=1e-5)
 
+        target_net = build_policy_net(policy_net_layers)
+        target_log_partition_net = build_log_partition_net(log_partition_net_layers)
+
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
+            # Copy weights from Q net into target Q net
+            if num_episode % args.target_update == 0:
+                target_net.load_state_dict(policy_net.state_dict())
+                target_log_partition_net.load_state_dict(log_partition_net.state_dict())
+
+            # Run episode and train Q net
             episode = run_episode(policy_net, gamma=args.gamma)
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
             error, log_partition_mean, log_partition_std, grad_norm = \
-                train_Q(policy_net, log_partition_net, episode, gamma=args.gamma)
+                train_Q(policy_net, log_partition_net, target_net, target_log_partition_net, episode, gamma=args.gamma)
 
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'error': {}, 'log_partition_mean': {}, 'log_partition_std: {}, grad_norm: {}'}},".format(i, num_episode, len(episode), episode[0].G, avg_return, error, log_partition_mean, log_partition_std, grad_norm))
