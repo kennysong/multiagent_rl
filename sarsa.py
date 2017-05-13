@@ -186,6 +186,9 @@ def train_Q(policy_net, log_partition_net, target_net, target_log_partition_net,
     h_n_batch = Variable(ZeroTensor(len(episode), h_size))
     c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
+    log_partition_net.zero_grad()
+    target_net.zero_grad()
+    target_log_partition_net.zero_grad()
 
     # Batch input to LSTM has size [num_agents, episode_len, lstm_input_size]
     input_batch = ZeroTensor(game.num_agents, len(episode), a_size + s_size)
