@@ -215,19 +215,21 @@ def train_Q(policy_net, log_partition_net, target_net, target_log_partition_net,
             sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
     # Do the same thing, but using the target network
-    target_sum_log_probs = Variable(ZeroTensor(len(episode)))
-    for i in range(game.num_agents):
-        o_n, h_n_batch, c_n_batch = target_net(input_batch[i], h_n_batch, c_n_batch)
-        dist = masked_softmax(o_n, action_mask_batch[i])
-        for j, step in enumerate(episode):
-            target_sum_log_probs[j] = target_sum_log_probs[j] + torch.log(dist[j, step.a[i]])
+    # target_sum_log_probs = Variable(ZeroTensor(len(episode)))
+    # for i in range(game.num_agents):
+    #     o_n, h_n_batch, c_n_batch = target_net(input_batch[i], h_n_batch, c_n_batch)
+    #     dist = masked_softmax(o_n, action_mask_batch[i])
+    #     for j, step in enumerate(episode):
+    #         target_sum_log_probs[j] = target_sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
     # Do a backward pass to compute the policy gradient term
     states = Variable(FloatTensor(np.asarray([step.s for step in episode])))
     R = Variable(FloatTensor(np.asarray([step.r for step in episode])))
     Q = sum_log_probs + log_partition_net(states)
-    Q_next = Variable(torch.cat((target_sum_log_probs.data[1:], ZeroTensor(1)))) + \
-             target_log_partition_net(states)
+    # Q_next = Variable(torch.cat((target_sum_log_probs.data[1:], ZeroTensor(1)))) + \
+    #          target_log_partition_net(states)
+    Q_next = Variable(torch.cat((sum_log_probs.data[1:], ZeroTensor(1)))).detach() + \
+             log_partition_net(states).detach()
     error = ((R + gamma*Q_next - Q)**2).mean()
     error.backward()
 
