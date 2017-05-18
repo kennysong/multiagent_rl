@@ -177,7 +177,7 @@ def run_policy_net(policy_net, state):
     x = Variable(FloatTensor([state]))
     o = policy_net(x)
     action_mask = ByteTensor(game.filter_joint_actions(state))
-    filt_o = o[action_mask].resize(1, action_mask.sum())
+    filt_o = o[action_mask].unsqueeze(0)
     dist = softmax(filt_o)
 
     # Sample an available action from dist

@@ -302,9 +302,9 @@ if __name__ == '__main__':
         if k == 1 or k == 2:
             policy_net_layers = [3*(k+m), 128, 9**k]
         elif k == 3:
-            policy_net_layers = [3*(k+m), 1024, 9**k]
+            policy_net_layers = [3*(k+m), 256, 9**k]
         elif k == 4:
-            policy_net_layers = [3*(k+m), 8192, 9**k]
+            policy_net_layers = [3*(k+m), 512, 9**k]
         value_net_layers = [3*(k+m), 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunter': True,
                           'timestep_reward': 0, 'capture_reward': 1,
