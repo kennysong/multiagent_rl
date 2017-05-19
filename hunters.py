@@ -36,6 +36,8 @@ remove_hunter = False
 capture_reward = 0
 # timestep_reward is the reward given at each time-step
 timestep_reward = -1
+# end_when_capture ends the game when a given number of rabbits is caught
+end_when_capture = None
 
 def start_state():
     '''Returns a random initial state. The state vector is a flat array of:
@@ -197,6 +199,8 @@ def filter_joint_actions(state):
 def is_end(s):
     '''Given a state, return if the game should end.'''
     rabbit_status = s[3*k::3]
+    if end_when_capture is not None:
+        return np.count_nonzero(rabbit_status == 0) >= end_when_capture
     return (rabbit_status == 0).all()
 
 def array_equal(a, b):
@@ -205,11 +209,13 @@ def array_equal(a, b):
 
 def set_options(options):
     '''Set some game options, if given.'''
-    global rabbit_action, remove_hunter, timestep_reward, capture_reward, n, k, m, num_agents
+    global rabbit_action, remove_hunter, timestep_reward, capture_reward, n, \
+           k, m, num_agents, end_when_capture
     rabbit_action = options.get('rabbit_action', rabbit_action)
     remove_hunter = options.get('remove_hunter', remove_hunter)
     timestep_reward = options.get('timestep_reward', timestep_reward)
     capture_reward = options.get('capture_reward', capture_reward)
+    end_when_capture = options.get('end_when_capture', end_when_capture)
     n = options.get('n', n)
     k = options.get('k', k)
     m = options.get('m', m)
