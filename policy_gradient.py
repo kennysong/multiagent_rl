@@ -60,8 +60,6 @@ def run_episode(policy_net, gamma=1.0):
             episode[-1].r += max_len_penalty
             break
 
-    print(state)
-
     # We have the reward from each (state, action), now calculate the return
     for i, step in enumerate(reversed(episode)):
         if i == 0: step.G = step.r
@@ -355,12 +353,12 @@ if __name__ == '__main__':
         game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         import hunters as game
-        k, m = 3, 3
+        k, m = 5, 5
         policy_net_layers = [3*(k+m) + 9, 128, 9]
         value_net_layers = [3*(k+m), 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunter': True,
                           'timestep_reward': 0, 'capture_reward': 1,
-                          'end_when_capture': None, 'k': k, 'm': m})
+                          'end_when_capture': 3, 'k': k, 'm': m})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
