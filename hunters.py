@@ -39,11 +39,20 @@ timestep_reward = -1
 # end_when_capture ends the game when a given number of rabbits is caught
 end_when_capture = None
 
-def start_state():
+def start_state(agents=None):
     '''Returns a random initial state. The state vector is a flat array of:
-        concat(hunter positions, rabbit positions).'''
+       concat(hunter positions, rabbit positions).'''
+    # Initialize random positions for hunters and rabbits
     start = np.random.randint(0, n, size=3*k+3*m)
     start[::3] = 1
+
+    # Reduce number of hunters & rabbits to agents, if specified
+    if agents is not None:
+        for h in range(3*agents, 3*k, 3):
+            start[h:h+3] = [0, -1, -1]
+        for r in range(3*k + 3*agents, 3*k+3*m, 3):
+            start[r:r+3] = [0, -1, -1]
+
     return start
 
 def valid_state(s):
