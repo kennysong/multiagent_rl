@@ -59,7 +59,7 @@ def filter_actions(state, agent_no):
     '''Filter the actions available for an agent in a given state. Returns a
        bitmask of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    avail_a = [1, 1, 1]
+    avail_a = np.ones(3, dtype=int)
     # Vertical agent
     if agent_no == 0:
         if state[0] == 0: avail_a[0] = 0
@@ -74,7 +74,7 @@ def filter_joint_actions(state):
     '''Filters the joint actions available in a given state. Returns a bitmap
        of available actions.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    avail_a = [1] * 9
+    avail_a = np.ones(9, dtype=int)
     for i in range(len(action_space)):
         # Check if action moves us off the grid
         a = action_space[i]
@@ -98,7 +98,7 @@ def a_indices_to_coordinates(a_indices):
 
 def joint_action_to_indices(joint_a):
     '''Convert a joint action into action indices.'''
-    a = action_space[joint_a.index(1)] + 1
+    a = action_space[joint_a] + 1
     return a.tolist()
 
 def set_options(options):

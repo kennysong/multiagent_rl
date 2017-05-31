@@ -1,12 +1,12 @@
 '''
-    This is a single-agent policy gradient implementation (REINFORCE with
-    baselines). It is a baseline to compare multi-agent policy gradient to.
-    Works for any game that conforms to the interface:
+    This is a multi-agent policy gradient implementation (REINFORCE with
+    baselines) for any game that conforms to the interface:
 
+      game.num_agents - number of agents
       game.start_state() - returns start state of the game
       game.is_end(state) - given a state, return if the game/episode has ended
-      game.perform_joint_action(s, a) - given a joint action at state s, returns next_s, reward
-      game.filter_joint_actions(s) - filter actions available in a given state
+      game.perform_action(s, a) - given action indices at state s, returns next_s, reward
+      game.filter_actions(s, n) - filter actions available for an agent in a given state
       game.set_options(options) - set options for the game
 '''
 
@@ -16,6 +16,7 @@ import os
 import random
 import sys
 import torch
+import time
 
 from namedlist import namedlist
 from torch.autograd import Variable
@@ -27,31 +28,31 @@ from torch.autograd import Variable
 EpisodeStep = namedlist('EpisodeStep', 's a r G', default=0)
 SMALL = 1e-7
 
-def run_episode(policy_net, gamma=1.0):
+def run_episode(policy_net, gamma=1.0, agents=None):
     '''Runs one episode of Gridworld Cliff to completion with a policy network,
-       which is a MLP that maps states to joint action probabilities.
+       which is a LSTM that maps states to action probabilities.
 
        Parameters:
-           policy_net: MLP policy network
+           policy_net: LSTM policy network
            gamma: discount factor for calculating returns
 
        Returns:
            [EpisodeStep(t=0), ..., EpisodeStep(t=T)]
     '''
     # Initialize state as player position
-    state = game.start_state()
+    state = game.start_state(agents)
     episode = []
 
     # Run game until agent reaches the end
     while not game.is_end(state):
         # Let our agent decide that to do at this state
-        a = run_policy_net(policy_net, state)
+        a_indices = run_policy_net(policy_net, state)
 
         # Take that action, then the game gives us the next state and reward
-        next_s, r = game.perform_joint_action(state, a)
+        next_s, r = game.perform_action(state, a_indices)
 
         # Record state, action, reward
-        episode.append(EpisodeStep(s=state, a=a, r=r))
+        episode.append(EpisodeStep(s=state, a=a_indices, r=r))
         state = next_s
 
         # Terminate episode early
@@ -72,10 +73,8 @@ def build_value_net(layers):
     '''
     value_net = torch.nn.Sequential(
                   torch.nn.Linear(layers[0], layers[1]),
-                  torch.nn.Tanh(),
+                  torch.nn.ReLU(),
                   torch.nn.Linear(layers[1], layers[2]))
-    value_net.layers = layers
-
     return value_net.cuda() if cuda else value_net
 
 def train_value_net(value_net, episode, td=None, gamma=1.0):
@@ -138,14 +137,28 @@ def run_value_net(value_net, state):
     return result.data[0][0]
 
 def build_policy_net(layers):
-    '''Builds an MLP policy network, which maps states to action vectors.
+    '''Builds an LSTM policy network, which maps states to action vectors.
 
-       More precisely, the input into the MLP will be the state vector. The
-       output of the MLP will be a vector that gives unnormalized probabilities
-       of each joint action (one-hot vector of a combination of agents'
-       actions). Softmax is applied afterwards, see run_policy_net().
+       More precisely, the input into the LSTM will be a vector consisting of
+       [prev_output, state]. The output of the LSTM will be a vector that
+       gives unnormalized probabilities of each action for the agents; softmax
+       is applied afterwards, see run_policy_net(). This model only handles one
+       time step, i.e. one agent, so it must be manually re-run for each agent.
     '''
-    return build_value_net(layers)
+    class PolicyNet(torch.nn.Module):
+        def __init__(self, layers):
+            super(PolicyNet, self).__init__()
+            self.lstm = torch.nn.LSTMCell(layers[0], layers[1])
+            self.linear = torch.nn.Linear(layers[1], layers[2])
+            self.layers = layers
+
+        def forward(self, x, h0, c0):
+            h1, c1 = self.lstm(x, (h0, c0))
+            o1 = self.linear(h1)
+            return o1, h1, c1
+
+    policy_net = PolicyNet(layers)
+    return policy_net.cuda() if cuda else policy_net
 
 def masked_softmax(logits, mask):
     """
@@ -174,29 +187,50 @@ def run_policy_net(policy_net, state):
     '''Wrapper function to feed a given state into the given policy network and
        return an action vector, as well as parameter gradients.
 
+       Essentially, run the policy_net LSTM for game.num_agents time-steps, to
+       get the action for each agent, conditioned on previous agents' actions.
+       As such, the input to the LSTM at time-step n is concat(a_{n-1}, state).
+       We return a list of action indices, one index per agent.
+
        Parameters:
-           policy_net: MLP that given a state returns action probabilities
+           policy_net: LSTM that given (x_n, h_n, c_n) returns o_nn, h_nn, c_nn
            state: state of the MDP
 
        Returns:
-           a_index: joint action index
+           a_indices: list of action indices of each agent
     '''
-    # Do a forward step through policy_net, filter actions, and softmax it
-    x = Variable(FloatTensor([state]))
-    o = policy_net(x)
-    action_mask = np.expand_dims(game.filter_joint_actions(state), axis=0)
-    dist = masked_softmax(o, action_mask)
+    # Prepare initial inputs for policy_net
+    a_indices = []
+    h_size, a_size = policy_net.layers[1], policy_net.layers[2]
+    a_n = np.zeros(a_size)
+    h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
+    x_n = Variable(FloatTensor([np.append(a_n, state)]))
 
-    # Sample an available action from dist
-    a_index = torch.multinomial(dist.data,1)[0,0]
+    # Use policy_net to predict output for each agent
+    for n in range(game.num_agents):
+        # Do a forward step through policy_net, filter actions, and softmax it
+        x_n.data.copy_(FloatTensor([np.append(a_n, state)]))
+        o_n, h_n, c_n = policy_net(x_n, h_n, c_n)
 
-    return a_index
+        # Select action over possible ones
+        action_mask = np.expand_dims(game.filter_actions(state, n), axis=0)
+        dist = masked_softmax(o_n, action_mask)
+        a_index = torch.multinomial(dist.data,1)[0,0]
 
-def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0,
-                     lr=3*1e-3):
+        # Record action for this iteration/agent
+        a_indices.append(a_index)
+
+        # Prepare inputs for next iteration/agent
+        a_n = np.zeros(a_size)
+        a_n[a_index] = 1
+
+    return a_indices
+
+def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entropy_weight = 0.0):
     '''Update the policy network parameters with the REINFORCE algorithm.
-       For each parameter W of the policy network, for each time-step t in the
-       episode, make the update:
+
+       That is, for each parameter W of the policy network, for each time-step
+       t in the episode, make the update:
          W += alpha * [grad_W(LSTM(a_t | s_t)) * (G_t - baseline(s_t))]
             = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
@@ -208,45 +242,67 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0,
            policy_net: LSTM policy network
            episode: list of EpisodeStep's
            val_baseline: value network used as the baseline term
-           td: k for a TD(k) estimate of G_t, td=None for a Monte-Carlo G_t
-           gamma: the discount term used for a TD(k) gradient term
+           td: k for a TD(k) estimate of G_t (requires val_baseline),
+               td=None for a Monte-Carlo G_t
+           gamma: discount term used for a TD(k) gradient term
     '''
-    if td is not None:
-        raise NotImplementedError('TD returns not implemented for the baseline!')
-
     # Pre-compute baselines
     values = [run_value_net(val_baseline, step.s) for step in episode]
     values = Variable(FloatTensor(np.asarray(values)))
 
     # Prepare for one forward pass, with the batch containing the entire episode
-    a_size = policy_net.layers[2]
+    h_size, a_size = policy_net.layers[1], policy_net.layers[2]
     s_size = len(episode[0].s)
+    h_n_batch = Variable(ZeroTensor(len(episode), h_size))
+    c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
 
-    # Fill input_batch with state for each agent, for each time-step
-    input_batch = ZeroTensor(len(episode), s_size)
-    for j, step in enumerate(episode):
-        input_batch[j].copy_(FloatTensor(step.s))
+    # Batch input to LSTM has size [num_agents, episode_len, lstm_input_size]
+    input_batch = ZeroTensor(game.num_agents, len(episode), a_size + s_size)
+
+    # Fill input_batch with concat(a_{n-1}, state) for each agent, for each time-step
+    for i in range(game.num_agents):
+        for j, step in enumerate(episode):
+            input_batch[i, j, a_size:].copy_(FloatTensor(step.s))
+            if i > 0: input_batch[i, j, step.a[i-1]] = 1
     input_batch = Variable(input_batch)
 
     # Fill action_mask_batch with action masks for each state
-    action_mask_batch = np.zeros((len(episode), a_size), dtype=int)
-    for j, step in enumerate(episode):
-        action_mask_batch[j] = game.filter_joint_actions(step.s)
+    action_mask_batch = np.zeros((game.num_agents, len(episode), a_size), dtype=int)
+    for i in range(game.num_agents):
+        for j, step in enumerate(episode):
+            action_mask_batch[i,j] = game.filter_actions(step.s, i)
 
     # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
     sum_log_probs = Variable(ZeroTensor(len(episode)))
-    o = policy_net(input_batch)
-    dist = masked_softmax(o, action_mask_batch)
-    for j, step in enumerate(episode):
-        sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a])
+    entropy_estimate = Variable(ZeroTensor(1))
+    for i in range(game.num_agents):
+        o_n, h_n_batch, c_n_batch = policy_net(input_batch[i], h_n_batch, c_n_batch)
+        dist = masked_softmax(o_n, action_mask_batch[i])
+        entropy_estimate += (- dist * torch.log(dist + SMALL)).sum()
+        for j, step in enumerate(episode):
+            sum_log_probs[j] = sum_log_probs[j] + torch.log(dist[j, step.a[i]])
 
-    # Do the backward pass to get grad_W(sum(log(p))) * (G_t - baseline(s_t))
-    returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
-    neg_performance = (sum_log_probs * (values - returns)).sum()
+    # Compute returns, either Monte-Carlo or TD(k)
+    if td is None: # Monte-Carlo
+        returns = Variable(FloatTensor(np.asarray([step.G for step in episode])))
+    else: # TD(k)
+        returns = []
+        for t in range(len(episode)):
+            t_end = t + td + 1  # TD requires we look forward until t_end
+            if t_end < len(episode):
+                G = sum([gamma**(j-t)*episode[j].r for j in range(t, t_end)]) + \
+                    values[t_end]
+            else:
+                G = sum([gamma**(j-t)*episode[j].r for j in range(t, len(episode))])
+            returns.append(G)
+        returns = Variable(FloatTensor(np.asarray(returns)))
+
+    # Do a backward pass to compute the policy gradient term
+    neg_performance = (sum_log_probs * (values - returns)).sum() - entropy_weight * entropy_estimate
     neg_performance.backward()
 
-    # Clip gradients to [-1, 1]
+    # Clip gradients to [-1, 1] and turn NaNs to 0
     for W in policy_net.parameters():
         # TODO: Is this necessary?
         if not cuda:
@@ -258,7 +314,7 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0,
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Runs multi-agent policy gradient.')
-    parser.add_argument('--game', choices=['gridworld', 'gridworld_3d', 'hunters'], required=True, help='A game to run')
+    parser.add_argument('--game', choices=['hunters'], required=True, help='A game to run')
     parser.add_argument('--cuda', default=False, action='store_true', help='Include to run on CUDA')
     parser.add_argument('--max_episode_len', default=float('inf'), type=float, help='Terminate episode early at this number of steps')
     parser.add_argument('--max_len_penalty', default=0, type=float, help='If episode is terminated early, add this to the last reward')
@@ -285,49 +341,35 @@ if __name__ == '__main__':
     ZeroTensor = lambda *s: torch.cuda.FloatTensor(*s).zero_() if cuda else torch.zeros(*s)
     ByteTensor = lambda x: torch.cuda.ByteTensor(x) if cuda else torch.ByteTensor(x)
 
-    if args.game == 'gridworld':
-        import gridworld as game
-        policy_net_layers = [2, 32, 9]
-        value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 12, 'grid_x': 12})
-    if args.game == 'gridworld_3d':
-        import gridworld_3d as game
-        policy_net_layers = [3, 64, 27]
-        value_net_layers = [3, 32, 1]
-        game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
-    elif args.game == 'hunters':
-        # Note: Not sure how many hidden layers to give the policy net
-        import hunters as game
-        k, m = 2, 2
-        if k == 1 or k == 2:
-            policy_net_layers = [3*(k+m), 128, 9**k]
-        elif k == 3:
-            policy_net_layers = [3*(k+m), 256, 9**k]
-        elif k == 4:
-            policy_net_layers = [3*(k+m), 512, 9**k]
-        value_net_layers = [3*(k+m), 64, 1]
-        game.set_options({'rabbit_action': None, 'remove_hunter': True,
-                          'timestep_reward': 0, 'capture_reward': 1,
-                          'end_when_capture': None, 'k': k, 'm': m, 'n': 6})
+    # Set up Hunters game
+    import hunters as game
+    k, m = 5, 5
+    policy_net_layers = [3*(k+m) + 9, 128, 9]
+    value_net_layers = [3*(k+m), 64, 1]
+    game.set_options({'rabbit_action': None, 'remove_hunter': True,
+                      'timestep_reward': 0, 'capture_reward': 1,
+                      'end_when_capture': None, 'k': k, 'm': m, 'n': 6})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
         value_net = build_value_net(value_net_layers)
-        optimizer_policy_net = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
         optimizer_value_net = torch.optim.RMSprop(value_net.parameters(), lr=1e-3, eps=1e-5)
+        optimizer_policy_net = torch.optim.RMSprop(policy_net.parameters(), lr=1e-3, eps=1e-5)
 
-        # RMSProp variables for policy net
-        mean_square = [ZeroTensor(W.size()) for W in policy_net.parameters()]
-        for W in mean_square: W += 1
-
+        agents = 3
         avg_value_error, avg_return = 0.0, 0.0
         for num_episode in range(args.num_episodes):
-            episode = run_episode(policy_net, gamma=args.gamma)
+            episode = run_episode(policy_net, gamma=args.gamma, agents=3)
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            train_policy_net(policy_net, episode, value_net, td=args.td_update, gamma=args.gamma)
+            train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
+
             print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
+
+            if num_episode > 0 and num_episode % 100000 == 0:
+                if agents < k: agents += 1
+                print('# agents = ' + str(agents))
 
         if args.save_policy is not None:
             if args.num_rounds > 1:

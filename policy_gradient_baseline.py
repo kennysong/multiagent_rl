@@ -1,4 +1,6 @@
 '''
+    Note: policy_gradient_batch_baseline.py is a faster version!
+
     This is a single-agent policy gradient implementation (REINFORCE with
     baselines). It is a baseline to compare multi-agent policy gradient to.
     Works for any game that conforms to the interface:
@@ -157,10 +159,17 @@ def run_policy_net(policy_net, state):
        For each parameter W, the gradient term `grad_W(log(p))` is also
        computed and returned. This is used in the REINFORCE algorithm; see
        train_policy_net().
+
+       Parameters:
+           policy_net: MLP that given a state returns action probabilities
+           state: state of the MDP
+
+       Returns:
+           a_index: joint action index
+           grad_W: gradient terms grad_W(log(p))
     '''
     # Prepare for forward and backward pass
     a_size = policy_net.layers[2]
-    a = [0] * a_size
     policy_net.zero_grad()
     softmax = torch.nn.Softmax()
 
@@ -168,13 +177,12 @@ def run_policy_net(policy_net, state):
     x = Variable(FloatTensor([state]))
     o = policy_net(x)
     action_mask = ByteTensor(game.filter_joint_actions(state))
-    filt_o = o[action_mask].resize(1, action_mask.sum())
+    filt_o = o[action_mask].unsqueeze(0)
     dist = softmax(filt_o)
 
     # Sample an available action from dist
     filt_a = np.arange(a_size)[action_mask.cpu().numpy().astype(bool)]
     a_index = np.random.choice(filt_a, p=dist[0].data.cpu().numpy())
-    a[a_index] = 1
 
     # Calculate log(p + eps); eps for numerical stability
     filt_a_index = 0 if a_index == 0 else action_mask[:a_index].sum()
@@ -184,7 +192,7 @@ def run_policy_net(policy_net, state):
     log_p.backward()
     grad_W = [W.grad.data.clone() for W in policy_net.parameters()]
 
-    return a, grad_W
+    return a_index, grad_W
 
 def train_policy_net(policy_net, episode, val_baseline=None, td=None, gamma=1.0,
                      lr=3*1e-3):
@@ -277,16 +285,16 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [2, 32, 9]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_y': 12, 'grid_x': 12})
     if args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [3, 64, 27]
         value_net_layers = [3, 32, 1]
-        game.set_options({'grid_z': 4, 'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         # Note: Not sure how many hidden layers to give the policy net
         import hunters as game
-        k, m = 3, 3
+        k, m = 2, 2
         if k == 1 or k == 2:
             policy_net_layers = [3*(k+m), 128, 9**k]
         elif k == 3:
@@ -296,7 +304,7 @@ if __name__ == '__main__':
         value_net_layers = [3*(k+m), 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunter': True,
                           'timestep_reward': 0, 'capture_reward': 1,
-                          'k': k, 'm': m})
+                          'end_when_capture': None, 'k': k, 'm': m, 'n': 6})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)

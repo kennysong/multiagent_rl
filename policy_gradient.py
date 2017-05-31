@@ -164,7 +164,7 @@ def masked_softmax(logits, mask):
     """
     Parameters:
         logits: Variable of size [batch_size, d]
-        mask: FloatTensor of size [batch_size, d]
+        mask: Numpy array of size [batch_size, d]
 
     Returns:
         probs: row-wise masked softmax of the logits
@@ -173,12 +173,12 @@ def masked_softmax(logits, mask):
     # http://timvieira.github.io/blog/post/2014/02/11/exp-normalize-trick/
 
     # b must be the max over the unmasked logits
-    inv_mask = ByteTensor(1 - mask.cpu().numpy().astype(int))
-    inf_logits = logits.masked_fill(Variable(inv_mask), float('-inf'))
+    inv_mask = Variable(ByteTensor(1 - mask))
+    inf_logits = logits.masked_fill(inv_mask, float('-inf'))
     b = torch.max(inf_logits, 1)[0].expand_as(inf_logits)
 
     # Calculate softmax; masked elements may explode, but are forced to 0
-    scores = torch.exp(logits - b).masked_fill(Variable(inv_mask), 0)
+    scores = torch.exp(logits - b).masked_fill(inv_mask, 0)
     total_scores = torch.sum(scores, 1).expand_as(scores)
     probs = scores / total_scores
     return probs
@@ -205,16 +205,15 @@ def run_policy_net(policy_net, state):
     a_n = np.zeros(a_size)
     h_n, c_n = Variable(ZeroTensor(1, h_size)), Variable(ZeroTensor(1, h_size))
     x_n = Variable(FloatTensor([np.append(a_n, state)]))
-    policy_net.zero_grad()
 
     # Use policy_net to predict output for each agent
     for n in range(game.num_agents):
         # Do a forward step through policy_net, filter actions, and softmax it
-        x_n.data.copy_(torch.Tensor([np.append(a_n, state)]))
+        x_n.data.copy_(FloatTensor([np.append(a_n, state)]))
         o_n, h_n, c_n = policy_net(x_n, h_n, c_n)
 
         # Select action over possible ones
-        action_mask = FloatTensor(game.filter_actions(state, n)).unsqueeze(0)
+        action_mask = np.expand_dims(game.filter_actions(state, n), axis=0)
         dist = masked_softmax(o_n, action_mask)
         a_index = torch.multinomial(dist.data,1)[0,0]
 
@@ -236,7 +235,8 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
             = alpha * [grad_W(sum(log(p))) * (G_t - baseline(s_t))]
        for all time steps in the episode.
 
-       (Notes: The sum is over the number of agents, each with an associated p)
+       (Notes: The sum is over the number of agents, each with an associated p
+               In practice, the time-steps are summed into one gradient update)
 
        Parameters:
            policy_net: LSTM policy network
@@ -248,31 +248,30 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
     '''
     # Pre-compute baselines
     values = [run_value_net(val_baseline, step.s) for step in episode]
+    values = Variable(FloatTensor(np.asarray(values)))
 
     # Prepare for one forward pass, with the batch containing the entire episode
-    a_indices = []
     h_size, a_size = policy_net.layers[1], policy_net.layers[2]
-    a_n = np.zeros(a_size)
+    s_size = len(episode[0].s)
     h_n_batch = Variable(ZeroTensor(len(episode), h_size))
     c_n_batch = Variable(ZeroTensor(len(episode), h_size))
     policy_net.zero_grad()
 
-    # Input to LSTM has size [num_agents, episode_len, each_input_size]
-    input_batch = ZeroTensor(game.num_agents, len(episode),
-                             a_size + len(episode[0].s))
+    # Batch input to LSTM has size [num_agents, episode_len, lstm_input_size]
+    input_batch = ZeroTensor(game.num_agents, len(episode), a_size + s_size)
 
     # Fill input_batch with concat(a_{n-1}, state) for each agent, for each time-step
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            input_batch[i, j, a_size:].copy_(torch.Tensor(step.s))
+            input_batch[i, j, a_size:].copy_(FloatTensor(step.s))
             if i > 0: input_batch[i, j, step.a[i-1]] = 1
     input_batch = Variable(input_batch)
 
     # Fill action_mask_batch with action masks for each state
-    action_mask_batch = ZeroTensor(game.num_agents, len(episode), a_size)
+    action_mask_batch = np.zeros((game.num_agents, len(episode), a_size), dtype=int)
     for i in range(game.num_agents):
         for j, step in enumerate(episode):
-            action_mask_batch[i,j,:].copy_(torch.Tensor(game.filter_actions(step.s, i)))
+            action_mask_batch[i,j] = game.filter_actions(step.s, i)
 
     # Do a forward pass, and fill sum_log_probs with sum(log(p)) for each time-step
     sum_log_probs = Variable(ZeroTensor(len(episode)))
@@ -300,14 +299,14 @@ def train_policy_net(policy_net, episode, val_baseline, td=None, gamma=1.0, entr
         returns = Variable(FloatTensor(np.asarray(returns)))
 
     # Do a backward pass to compute the policy gradient term
-    values = Variable(FloatTensor(np.asarray(values)))
     neg_performance = (sum_log_probs * (values - returns)).sum() - entropy_weight * entropy_estimate
     neg_performance.backward()
 
     # Clip gradients to [-1, 1] and turn NaNs to 0
     for W in policy_net.parameters():
         # TODO: Is this necessary?
-        # W.grad.data = FloatTensor(np.nan_to_num(W.grad.data.numpy()))
+        if not cuda:
+            W.grad.data = FloatTensor(np.nan_to_num(W.grad.data.numpy()))
         W.grad.data.clamp_(-1,1)
 
     # Do a step of RMSProp
@@ -346,7 +345,7 @@ if __name__ == '__main__':
         import gridworld as game
         policy_net_layers = [5, 32, 3]
         value_net_layers = [2, 32, 1]
-        game.set_options({'grid_y': 4, 'grid_x': 4})
+        game.set_options({'grid_y': 12, 'grid_x': 12})
     elif args.game == 'gridworld_3d':
         import gridworld_3d as game
         policy_net_layers = [6, 32, 3]
@@ -354,12 +353,12 @@ if __name__ == '__main__':
         game.set_options({'grid_z': 6, 'grid_y': 6, 'grid_x': 6})
     elif args.game == 'hunters':
         import hunters as game
-        k, m = 4, 4
+        k, m = 5, 5
         policy_net_layers = [3*(k+m) + 9, 128, 9]
         value_net_layers = [3*(k+m), 64, 1]
         game.set_options({'rabbit_action': None, 'remove_hunter': True,
                           'timestep_reward': 0, 'capture_reward': 1,
-                          'k': k, 'm': m})
+                          'end_when_capture': 3, 'k': k, 'm': m, 'n': 6})
 
     for i in range(args.num_rounds):
         policy_net = build_policy_net(policy_net_layers)
@@ -373,8 +372,9 @@ if __name__ == '__main__':
             value_error = train_value_net(value_net, episode, td=args.td_update, gamma=args.gamma)
             avg_value_error = 0.9 * avg_value_error + 0.1 * value_error
             avg_return = 0.9 * avg_return + 0.1 * episode[0].G
-            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
             train_policy_net(policy_net, episode, val_baseline=value_net, td=args.td_update, gamma=args.gamma)
+
+            print("{{'i': {}, 'num_episode': {}, 'episode_len': {}, 'episode_return': {}, 'avg_return': {}, 'avg_value_error': {}}},".format(i, num_episode, len(episode), episode[0].G, avg_return, avg_value_error))
 
         if args.save_policy is not None:
             if args.num_rounds > 1:

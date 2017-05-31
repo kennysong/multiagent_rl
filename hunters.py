@@ -36,12 +36,23 @@ remove_hunter = False
 capture_reward = 0
 # timestep_reward is the reward given at each time-step
 timestep_reward = -1
+# end_when_capture ends the game when a given number of rabbits is caught
+end_when_capture = None
 
-def start_state():
+def start_state(agents=None):
     '''Returns a random initial state. The state vector is a flat array of:
-        concat(hunter positions, rabbit positions).'''
+       concat(hunter positions, rabbit positions).'''
+    # Initialize random positions for hunters and rabbits
     start = np.random.randint(0, n, size=3*k+3*m)
     start[::3] = 1
+
+    # Reduce number of hunters & rabbits to agents, if specified
+    if agents is not None:
+        for h in range(3*agents, 3*k, 3):
+            start[h:h+3] = [0, -1, -1]
+        for r in range(3*k + 3*agents, 3*k+3*m, 3):
+            start[r:r+3] = [0, -1, -1]
+
     return start
 
 def valid_state(s):
@@ -113,7 +124,7 @@ def filter_actions(state, agent_no):
        bitmap of available actions. Hunters out of the game can only choose
        the "stay" action.
        E.g. an agent in a corner is not allowed to move into a wall.'''
-    avail_a = [1] * 9
+    avail_a = np.ones(9, dtype=int)
     hunter_pos = state[3*agent_no + 1:3*agent_no + 3]
 
     # Hunter is out of the game, can only stay
@@ -197,6 +208,8 @@ def filter_joint_actions(state):
 def is_end(s):
     '''Given a state, return if the game should end.'''
     rabbit_status = s[3*k::3]
+    if end_when_capture is not None:
+        return np.count_nonzero(rabbit_status == 0) >= end_when_capture
     return (rabbit_status == 0).all()
 
 def array_equal(a, b):
@@ -205,11 +218,13 @@ def array_equal(a, b):
 
 def set_options(options):
     '''Set some game options, if given.'''
-    global rabbit_action, remove_hunter, timestep_reward, capture_reward, n, k, m, num_agents
+    global rabbit_action, remove_hunter, timestep_reward, capture_reward, n, \
+           k, m, num_agents, end_when_capture
     rabbit_action = options.get('rabbit_action', rabbit_action)
     remove_hunter = options.get('remove_hunter', remove_hunter)
     timestep_reward = options.get('timestep_reward', timestep_reward)
     capture_reward = options.get('capture_reward', capture_reward)
+    end_when_capture = options.get('end_when_capture', end_when_capture)
     n = options.get('n', n)
     k = options.get('k', k)
     m = options.get('m', m)
@@ -243,11 +258,9 @@ def joint_action_to_indices(joint_a):
          nth hunter will cycle through actions [0, A) on every +A^n joint action number
        (This is also base A, in reverse digit order.)
     '''
-    assert sum(joint_a) == 1
     a_indices = [None] * k
-    joint_a_num = joint_a.index(1)
     for hunter in range(k):
-        a_indices[hunter] = (joint_a_num // 9**hunter) % 9
+        a_indices[hunter] = (joint_a // 9**hunter) % 9
     return a_indices
 
 def opposite_direction(s, a, i):
