@@ -1,3 +1,5 @@
+Thesis is available [here](report.pdf).
+
 ## Notes
 
 Starting the virtualenv:
